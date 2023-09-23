@@ -6,9 +6,9 @@ Pipeline de Metabarcoding para la
 caracterización de macroinvertebrados
 
 Versión: 0.1
-Autor: Rubén Cañas
-Grupo: Global Omnium
-Fecha: 09/09/2022
+Autor: Rosa Bermejo
+Grupo: TFM bioinformática VIU
+Fecha: Septiembre 2023
 ####################################
 "
 doc2="
