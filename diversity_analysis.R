@@ -81,8 +81,7 @@ biom_to_ampvis <- function(biomfile, metafile, treefile, ncbitax = T){
 }
 join_physeqs <- function(physeq_COI, physeq_18S){
   # Nota posterior: esta función está hecha porque los datos de hash de las 
-  # OTUs se matan si son iguales al hacer merge_phyloseq (lo cual pasa más
-  # de lo que debería)
+  # OTUs no funcionan bien si son iguales al hacer merge_phyloseq
     
   ## Unión de objetos phyloseq ##
   
@@ -231,9 +230,6 @@ ampData$metadata$muestramarcador <- paste(
   sep = "-"
 )
 save(ampData, file = "ampvis_all.RData")
-# Sinceramente ahora me preocupa menos separar las muestras.
-# Aun así, va a haber mareo de cambio de phyloseq a ampvis por un bug en el código
-# de phyloseq y que el ampvis hay algunas cosas que no las hace o las hace reguleras
 
 # Diversidad alfa
 amp_c <- amp_filter_samples(ampData, medio == "Continental")
@@ -265,10 +261,10 @@ alfa_c_p %>%
 
 amp_c <- amp_filter_samples(ampData, medio == "Continental")
 amp_cm <- amp_merge_replicates(amp_c, "muestramarcador", round = "up")
-# ampvis mezcla muy bien replicados (en phyloseq está buggeado) pero para los
-# filtros taxonómicos es mejor phyloseq y  el agregado de taxones se hace con
-# microbiome que utiliza solo objetos phyloseq, hay que estar mareando la perdiz 
-# para poder hacer esto
+# ampvis mezcla muy bien replicados pero para los
+# filtros taxonómicos es mejor phyloseq y el agregado de taxones se hace con
+# microbiome que utiliza solo objetos phyloseq
+                        
 seed = 1234
 
 phy_cm <- amp2phy(amp_cm)
@@ -311,11 +307,9 @@ alfa_cap %>%
   theme_bw()
 
 
-## No he encontrado una manera mejor de hacer esto sinceramente
 # Juntamos los datos de tax y otus
 amp_cmfa <- amp_load(phy_cmfa)
-amp_cmfa <- filter_otus(amp_cmfa, 0.1) # voy a filtrar también aquí porque sino
-# se va un poco de madre, y sinceramente las otus menores al .1% son un poco estafa
+amp_cmfa <- filter_otus(amp_cmfa, 0.1) # eliminamos las otus menores al .1%
 data_venn <- merge(amp_cmfa$abund, amp_cmfa$tax, by = 0)
 # data_venn <- merge(phy_cmfa@otu_table@.Data, phy_cmfa@tax_table@.Data, by = 0)
 # Separamos en objetos cada una de las taxonomías asociadas a cada marcador
@@ -345,7 +339,7 @@ ggVennDiagram(
 
 amp_cmfa_r <- amp_load(phy_cmfa_r)
 # amp_cmfa <- amp_load(phy_cmfa)
-# He creado los dos objetos pero sinceramente creo que para este caso, como 
+# Creamos los los dos objetos pero para este caso, como 
 # estamos viendo cualitativamente las familias, no es necesario el dataset
 # rarefactado. Eso solo para cuando se vayan a sacar significaciones estadísticas.
 
@@ -358,7 +352,7 @@ p <- amp_boxplot(amp_cmfa,
   geom_boxplot(aes(fill = .Group), alpha = .2)+
   scale_color_brewer(palette = "Set2") + 
   scale_fill_brewer(palette = "Set2", guide = "none") +
-  # stat_compare_means(label.y.npc = "bottom") + # se ve bien feo en este gráfico
+  # stat_compare_means(label.y.npc = "bottom") +
   labs(color = "Marcador",
        y = "Abundancia relativa (%)")
 
@@ -433,7 +427,7 @@ plot_grid(
 )
 
 # PERMANOVAS
-## También toca hacer la estadística, no solo van a ser dibujitos.
+## Análisis estadístico.
 # Punto
 bray <- distance(phy_cmfa_r, method = "bray")
 df <- as(sample_data(phy_cmfa_r), "data.frame") # por algun motivo no funciona con as.data.frame
@@ -486,9 +480,8 @@ kbl(res_final, caption = "Resultados PERMANOVA",
 
 # Índice de calidad biótico: IBMWP
 
-# Al unir todos los phyloseq en uno se carga los taxones que no le gustan, aka
-# los que no metí en Visu, AKA justo los que se necesitan para el IBMWP, 
-# así que voy a crear otra lista de los phyloseq de mb únicamente para hacer esto
+# Al unir todos los phyloseq en uno no salen algunos taxones necesarios para el IBMWP.
+# Creamos otra lista de los phyloseq de mb únicamente para hacer esto
 physeq_onlymb <- join_physeq_list(phy_list_mb)
 phy_taxmb <- subset_samples(physeq_onlymb, medio == "Continental")
 # Para agregar los datos de 18S y COI de las réplicas técnicas si fuese necesario
@@ -516,7 +509,7 @@ com_red <- com_table[!is.na(com_table$Superorder),]
 com_red <- com_red[,-1] # Quito las OTUs
 
 
-### Voy a tener que hacer una vaina para poder agrupar las muestras con sus réplicas
+### Agrupar las muestras con sus réplicas
 whole_samples <- unique(metadata_df$muestra)
 
 
@@ -598,7 +591,7 @@ df_res <- read.delim("IBMWP_AllSamples.tsv", sep = "\t", header = T)
 # por si veo que está mal, de nuevo lo siento).
 visu_res <- read.delim("tabla_ibmwp_limne.tsv", sep = "\t", header = T)
 
-## sliceo los resultados según lo que se quiere ver/analizar
+## separamos los resultados según lo que se quiere ver/analizar
 i <- 1
 j <- 9
 k <- 117
