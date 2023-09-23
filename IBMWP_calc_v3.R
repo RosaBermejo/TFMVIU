@@ -73,7 +73,7 @@ rownames(physeq_18S@otu_table)[repotu_18S] <- paste0(rownames(physeq_18S@otu_tab
 physeqData <- merge_phyloseq(physeq_18S, physeq_COI)
 # physeqData <- physeq_COI
 
-# Voy a obtener las muestras para un futuro
+# Muestras para un futuro
 samnames <- physeqData@sam_data$sample.id
 
 # Selección de muestras
@@ -83,7 +83,7 @@ metadata_df <- read.delim(metadata_file_18S)
 
 physeqData <- subset_samples(physeqData, sample.id %in% selected_samples)
 
-# Como me da en la nariz que cada bicho que te encuentras sólo se anota una vez, pues voy a dejar hecho el por si acaso.  
+# Cada individuo sólo se anota una vez.  
 tax_table <- as.data.frame(physeqData@tax_table@.Data)
 tax_red <-tax_table[IBMWP_rank]
 otu_table <- as.data.frame(physeqData@otu_table@.Data)
@@ -92,14 +92,14 @@ com_table <- merge(otu_table, tax_red, by = 0, all.x = T, all.y = F)
 com_red <- com_table[!is.na(com_table$Superorder),]
 com_red <- com_red[,-1] # Quito las OTUs
 
-## Para esta vez voy a quitar 0s y quitar los 
+## Para esta vez quitamos 0s y los 
 
 # com_red$Total <- apply(com_red[,selected_samples], 1, sum)
 # com_red <- com_red[,-which(names(com_red) %in% selected_samples)]
 
 # com_red <- com_red[,c( length(com_red), 1:length(com_red)-1)]
 
-### Voy a tener que hacer una vaina para poder agrupar las muestras con sus réplicas
+### Agrupar muestras con sus réplicas
 whole_samples <- unique(metadata_df$muestra)
 
 for (i in seq(whole_samples)){
@@ -155,9 +155,7 @@ for (i in seq(nsam)){
 colnames(df_res) <- c("Sample", "IBMWP_Score", "Observed_Taxa")
 colnames(df_cant) <- c("Count", "Observed_Taxa")
 
-# Ahora falta la cuestión de que hay que agrupar a los bichitos antes de hacer la relativización
-# y esas cosas. A ver, como la vaina esta no estaba hecho en consideración para las muestras lo 
-# mismo lo tengo que añadir si no quiero que se me buggee toda esta vaina ngl
+# Agrupar individuos para la relativización
 df_cant$Count <- as.numeric(df_cant$Count)
 df_res$IBMWP_Score <- as.numeric(df_res$IBMWP_Score)
 
@@ -170,7 +168,7 @@ df_cant_2 <- df_cant %>%
 
 # df_cant <- df_cant[order(df_cant$relative),]
 
-# la verdad que este gráfico va a haber que cambiarlo si hay más de una muestra
+# Valorar utilidad de este gráfico si hay más de una muestra
 ggplot(data = df_cant_2, aes(x = reorder(Observed_Taxa,relative), y = relative, Fill = Observed_Taxa, group = Observed_Taxa , 
                            label = round(relative, digits = 2))) + 
   geom_bar(stat = "identity", fill = "#6DB6FF", color = "black", width = 0.75) +
