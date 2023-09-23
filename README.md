@@ -11,7 +11,7 @@ morfotaxonómica tradicional. Este trabajo se encuentra dentro del área de cono
 
 La pipeline está diseñada para analizar amplicones del gen **18S y COI secuenciados por Illumina**.
 
-- ##Se incluye:
+- ## Se incluye:
   -   La creación, descarga y curado de la base de datos
   -   Preprocesado, análisis y asignación taxonómica de las lecturas
   -   Visualización gráfica de los resultados
