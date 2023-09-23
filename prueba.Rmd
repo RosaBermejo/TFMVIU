@@ -1,0 +1,1599 @@
+---
+title: "Diversity Analysis on macroinvertebrate samples"
+author: "Rubén Cañas"
+date: "`r Sys.Date()`"
+output:
+  bookdown::pdf_document2:
+    toc: yes
+    toc_depth: 3
+    number_sections: yes
+    global_numbering: false
+    fig_caption: yes
+    df_print: kable
+    keep_tex: yes
+    extra_dependencies: float
+    
+fontsize: 12pt
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{longtable}
+  - \usepackage{array}
+  - \usepackage{multirow}
+  - \usepackage{wrapfig}
+  - \usepackage{float}
+  - \usepackage{colortbl}
+  - \usepackage{pdflscape}
+  - \usepackage{tabu}
+  - \usepackage{threeparttable}
+  - \usepackage{threeparttablex}
+  - \usepackage[normalem]{ulem}
+  - \usepackage{makecell}
+  - \usepackage{xcolor}
+  - \let\counterwithout\relax
+  - \let\counterwithin\relax
+  - \usepackage{chngcntr}
+  - \counterwithin{figure}{section}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(eval = TRUE)
+knitr::opts_chunk$set(results = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "")
+
+
+```
+
+\newpage
+
+```{r}
+# Nota al principio del código: Voy a tratar de escribir el informe como si 
+# no fuese a llevar código, por si luego se necesita entregar en cualquier 
+# parte o lo que sea. Pero todo con respecto al código estará comentado
+# en los chunks. También así facilitará la lectura de los resultados.
+library(ggpubr)
+library(ggVennDiagram)
+library(ggthemes)
+library(digest)
+library(tidyverse)
+library(dplyr)
+library(phyloseq)
+library(ggplot2)
+library(plotly)
+library(vegan)
+library(ampvis2)
+library(microbiome)
+library(cowplot)
+library(kableExtra)
+options(knitr.table.format = "latex")
+
+biom2physeq <- function(biom_file, metafile, ncbitax = T){
+  physeqObject <- import_biom( biom_file,
+                               refseqArgs = NULL, 
+                               parseFunction = parse_taxonomy_default,
+                               parallel = FALSE)
+  if (isTRUE(ncbitax)){
+    colnames(physeqObject@tax_table) <- c("Kingdom","Subkingdom","Superphylum",
+                                          "Phylum","Subphylum","Superclass",
+                                          "Class","Subclass", "Superorder",
+                                          "Order", "Suborder", "Superfamily",
+                                          "Family", "Subfamily","Genus", "Species")
+    
+  } else {
+    colnames(physeqObject@tax_table) <- c("Kingdom", "Phylum", "Class",
+                                          "Order","Family", "Genus", "Species")
+  }
+  
+  metadata <- read.delim(metafile, header = T, sep = "\t")
+  samples <- metadata[,1]
+  rownames(metadata) <- samples
+  
+  ord <- match(colnames(otu_table(physeqObject)), rownames(metadata))
+  metadata <- metadata[ord,]
+  sampledata = sample_data(metadata)
+  physeqData <- merge_phyloseq(physeqObject, sampledata)
+  return(physeqData)
+}
+biom_to_ampvis <- function(biomfile, metafile, treefile, ncbitax = T){
+  physeqObject <- import_biom(biomfile,
+                              treefilename = treefile,
+                              refseqArgs = NULL, 
+                              parseFunction = parse_taxonomy_default,
+                              parallel = FALSE)
+  if (isTRUE(ncbitax)){
+    colnames(physeqObject@tax_table) <- c("Kingdom","Subkingdom","Superphylum",
+                                          "Phylum","Subphylum","Superclass",
+                                          "Class","Subclass", "Superorder",
+                                          "Order", "Suborder", "Superfamily",
+                                          "Family", "Subfamily","Genus", "Species")
+    
+  } else {
+    colnames(physeqObject@tax_table) <- c("Kingdom", "Phylum", "Class",
+                                          "Order","Family", "Genus", "Species")
+  }
+  
+  metafile <- read.delim(metafile, header = T, sep = "\t")
+  samples <- metafile[,1]
+  rownames(metafile) <- samples
+  
+  ord <- match(colnames(otu_table(physeqObject)), rownames(metafile))
+  metafile <- metafile[ord,]
+  sampledata = sample_data(metafile)
+  physeqData <- merge_phyloseq(physeqObject, sampledata)
+  
+  if (isTRUE(ncbitax)){
+    ### Eliminamos los taxones que no interesan y convertimos a formato ampvis
+    taxa <- physeqData@tax_table@.Data
+    new_taxa <- taxa[,c(1,4,7,10,13,15,16)]
+    
+    physeqData@tax_table@.Data <- new_taxa
+  }
+  
+  ampData_COI <- phyloseq_to_ampvis2(physeqData)
+}
+join_physeqs <- function(physeq_COI, physeq_18S){
+  # Nota posterior: esta función está hecha porque los datos de hash de las 
+  # OTUs se matan si son iguales al hacer merge_phyloseq (lo cual pasa más
+  # de lo que debería)
+  
+  # # COI
+  # physeq_COI@sam_data$sample.id <- sub("-COI", "", physeq_COI@sam_data$sample.id )
+  # rownames(physeq_COI@sam_data) <- sub("-COI", "", rownames(physeq_COI@sam_data) )
+  # colnames(physeq_COI@otu_table) <- sub("-COI", "", colnames(physeq_COI@otu_table))
+  # # 18S
+  # physeq_18S@sam_data$sample.id <- sub("-18S", "", physeq_18S@sam_data$sample.id )
+  # rownames(physeq_18S@sam_data) <- sub("-18S", "", rownames(physeq_18S@sam_data) )
+  # colnames(physeq_18S@otu_table) <- sub("-18S", "", colnames(physeq_18S@otu_table))
+  
+  ## Unión de objetos phyloseq ##
+  
+  # Revisar si existen OTUs repetidas (hash), y cambiarlo en uno de los objetos
+  repotu_18S <- which(rownames(physeq_18S@tax_table) %in% 
+                        rownames(physeq_COI@tax_table))
+  rownames(physeq_18S@tax_table)[repotu_18S] <- paste0(rownames(physeq_18S@tax_table)[repotu_18S], "-2")
+  rownames(physeq_18S@otu_table)[repotu_18S] <- paste0(rownames(physeq_18S@otu_table)[repotu_18S], "-2")
+  
+  physeqData <- merge_phyloseq(physeq_18S, physeq_COI)
+}
+visu2physeq <- function(visu_file, metavisu_file){ # aviso que esto solo va a 
+  # aviso que esto solo va a funcionar con los metadatos actuales, ya que 
+  # está hardcodeado a las variables de ahora.
+  df <- read_delim(visu_file)
+  rownames(df) <- apply(df, 1, function(x) digest(x, "md5", serialize = TRUE))
+  tax_df <- df[,1:7, drop = F]
+  otu_df <- df[,8:ncol(df), drop = F]
+  rownames(tax_df) <- rownames(df)
+  rownames(otu_df) <- rownames(df)
+  otumat <- as.matrix(otu_df)
+  taxmat <- as.matrix(tax_df)
+  metavisu <- read.csv(metavisu_file, header = T, sep = "\t")
+  otu <- otu_table(otumat, taxa_are_rows = T)
+  tax <- tax_table(taxmat)
+  rownames(metavisu) <- metavisu$sample.id
+  sam <- sample_data(metavisu)
+  physeq_visu <- phyloseq(otu, tax, sam)
+  return(physeq_visu)
+}
+join_physeq_list <- function(phyloseq_obj_list){
+  for (i in seq(phy_list)){
+    if (i == 1){
+      new_phy <- phy_list[[i]]
+    } else {
+      new_phy <- join_physeqs(new_phy, phy_list[[i]])
+    }
+  }
+  return(new_phy)
+}
+amp2phy <- function(amp_obj){
+  phy_obj <- phyloseq(otu_table(as.matrix(amp_obj$abund), taxa_are_rows = T),
+  tax_table(as.matrix(amp_obj$tax)),
+  sample_data(amp_obj$metadata))
+  return(phy_obj)
+}
+
+setwd("~/Trabajo/macroinvertebrates/ATALAYA")
+```
+
+# Preámbulo {-}
+
+## Análisis Bioinformático y obtención de los datos de metataxonómica {-}  
+
+Los datos de secuenciación han sido analizados mediante una *Pipeline* clásica de metataxonómica en la suite **Qiime2**:  
+
+1. **Preprocesado**: Las secuencias son preprocesadas para evitar incluir lecturas de mala calidad.  
+2. **Denoising**, que consiste en la eliminación de secuencias de mala calidad para el análisis taxonómico y la eliminación de secuencias quimera que se hayan podido dar durante el proceso de amplificación.  
+3. **Dereplicado de secuencias**:Se realiza el dereplicado de secuencais, que consiste en la agrupación de las secuencias que sean prácticamente similares. En los trabajos de metataxonómica se suelen utilizar OTUs (operational taxonomic units), que agrupan secuencias con un 95 a 99% de identidad normalmente. No obstante, para este estudio interesa que la resolución taxonómica sea máxima, por lo que se utilizarán ASVs (Amplicon Sequence Variants), que agrupan únicamente secuencias exactamente idénticas.  
+4. **Clasificación taxonómica**: La clasificación de las ASVs se ha realizado contra réplicas curadas de la base de datos NCBI para 18S y para COI. El proceso de clasificación se ha realizado con el algoritmo BLAST, con parámetros de valor mínimo de identidad en 90% e índice de confianza (e-valor) de $1\cdot10^{-50}$.
+5. **Análisis estadísticos y visualización**: Los análisis de los resultados brutos se han realizado en el lenguaje de programación R, mediante los paquetes de análisis de estadística y visualización aplicada a la Ecología: Phyloseq, ampvis2, microbiome y vegan.
+
+
+```{r}
+### Tanda 1
+file_18S_1 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda1_180523_18S/biom/table-with-tax-json.biom"
+file_COI_1 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda1_240523_COI/biom/table-with-tax-json.biom"
+tree_18S_1 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda1_180523_18S/qiime/unrooted-tree.nwk"
+tree_COI_1 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda1_240523_COI/qiime/unrooted-tree.nwk"
+metadata_file_18S_1 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda1_180523_18S/metadata.tsv"
+metadata_file_COI_1 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda1_240523_COI/metadata.tsv"
+
+physeq_18S_1 <- biom2physeq(file_18S_1,
+                          metadata_file_18S_1,
+                          ncbitax = T)
+physeq_COI_1 <- biom2physeq(file_COI_1, 
+                          metadata_file_COI_1,
+                          ncbitax = T)
+physeq_COI_1@tax_table@.Data["d8a23100187db1681a38dcce6c3536e7", "Family"] = "" # Errata en la taxonomía
+# Se define la lista donde se almacenarán todos los objetos phyloseq
+phy_list <- list(physeq_18S_1, physeq_COI_1)
+phy_list_mb <- list(physeq_18S_1, physeq_COI_1)
+
+```
+
+
+```{r}
+### Tanda 2
+
+file_18S_2 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda2_230823_18S/biom/table-with-tax-json.biom"
+file_COI_2 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda2_230904_COI/biom/table-with-tax-json.biom"
+tree_18S_2 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda2_230823_18S/qiime/unrooted-tree.nwk"
+tree_COI_2 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda2_230904_COI/qiime/unrooted-tree.nwk"
+metadata_file_18S_2 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda2_230823_18S/metadata.tsv"
+metadata_file_COI_2 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda2_230904_COI/metadata.tsv"
+
+physeq_18S_2 <- biom2physeq(file_18S_2,
+                            metadata_file_18S_2,
+                            ncbitax = T)
+physeq_COI_2 <- biom2physeq(file_COI_2, 
+                            metadata_file_COI_2,
+                            ncbitax = T)
+# Se añaden a la lista los nuevos objetos phyloseq
+phy_list <- append(phy_list, physeq_18S_2)
+phy_list <- append(phy_list, physeq_COI_2)
+phy_list_mb <- append(phy_list_mb, physeq_18S_2)
+phy_list_mb <- append(phy_list_mb, physeq_COI_2)
+```
+
+
+
+```{r}
+### Tanda 3
+file_18S_3 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda3_230912_18S/biom/table-with-tax-json.biom"
+file_COI_3 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda3_230908_COI/biom/table-with-tax-json.biom"
+tree_18S_3 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda3_230912_18S/qiime/unrooted-tree.nwk"
+tree_COI_3 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda3_230908_COI/qiime/unrooted-tree.nwk"
+metadata_file_18S_3 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda3_230912_18S/metadata.tsv"
+metadata_file_COI_3 <- "~/Trabajo/macroinvertebrates/ATALAYA/Tanda3_230908_COI/metadata.tsv"
+
+physeq_18S_3 <- biom2physeq(file_18S_3,
+                            metadata_file_18S_3,
+                            ncbitax = T)
+physeq_COI_3 <- biom2physeq(file_COI_3, 
+                            metadata_file_COI_3,
+                            ncbitax = T)
+phy_list <- append(phy_list, physeq_COI_3)
+phy_list <- append(phy_list, physeq_18S_3)
+phy_list_mb <- append(phy_list_mb, physeq_COI_3)
+phy_list_mb <- append(phy_list_mb, physeq_18S_3)
+```
+
+## Importación de los datos de visualización taxonómica {-}
+
+Para poder realizar el análisis conjunto de los datos, los resultados de visualización taxonómica ofrecidos por el Limne y la Universidad de Alicante para medio continental y medio marino, respectivamente, es necesario un pequeño ajuste de los datos para poder incluirlos en la estructura de los datos de los paquetes de análisis.  
+
+Esta transformación hace que tengamos 3 archivos que importaremos en la estructura de datos de los paquetes:  
+
+- *otu_table*: Tabla de conteos de los individuos para cada muestra.  
+- *tax_table*: Tabla de taxonomía para cada individuo identificado.  
+- *metadata*: Tabla de metadatos con las condiciones para cada muestra.  
+
+Estos datos se unen entre sí gracias al ID de cada muestra, además de por un código *hash* que se ha debido de crear para identificar cada conteo con una taxonomía (relación 1:1 obligatoria). El hash se ha creado con encriptado md5, para ser homogéneo con la identificación de ASVs usual en Metataxonómica.  
+
+```{r, message=F, results=F, warning=F}
+
+### Resultados de Visu
+
+wd_c <- "~/Trabajo/macroinvertebrates/ATALAYA/visu/Continental/"
+wd_m <- "~/Trabajo/macroinvertebrates/ATALAYA/visu/Marino/"
+physeq_visu_c <-
+  visu2physeq(paste0(wd_c, "taxonomia_continental.csv"), 
+              paste0(wd_c, "metadata.tsv"))
+physeq_visu_m <-
+  visu2physeq(paste0(wd_m, "taxonomia_marino_2.csv"), 
+              paste0(wd_m, "metadata.tsv"))
+
+phy_list <- append(phy_list, physeq_visu_c)
+phy_list <- append(phy_list, physeq_visu_m)
+```
+
+El objeto final, una vez unimos todos los resultados es el siguiente:  
+
+
+```{r}
+### Agrupamiento de todos los resultados
+physeq_all <- join_physeq_list(phy_list)
+physeq_all
+```
+
+
+```{r}
+### Cambio de formato a ampvis2
+
+# Lo primero va a ser revisar las muestras y OTUs que tengan 0 lecturas
+# Lo segundo lo hace automáticamente el ampvis al pasarlo, pero lo primero no
+ps <- names(which(colSums(physeq_all@otu_table) > 0))
+physeq_all <- prune_samples(ps, physeq_all)
+save(physeq_all, file = "physeq_all.RData")
+taxa <- physeq_all@tax_table@.Data
+# ampvis2 no admite más que los siguientes taxones:
+new_taxa <- taxa[,c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")]
+physeq_all@tax_table@.Data <- new_taxa
+ampData <- amp_load(physeq_all) # Creo que al final lo haré con phyloseq
+ampData$metadata$muestramarcador <- paste(
+  ampData$metadata$muestra,
+  ampData$metadata$marcador,
+  sep = "-"
+)
+save(ampData, file = "ampvis_all.RData")
+# Sinceramente ahora me preocupa menos separar las muestras.
+# Aun así, va a haber mareo de cambio de phyloseq a ampvis por un bug en el código
+# de phyloseq y que el ampvis hay algunas cosas que no las hace o las hace reguleras
+
+```
+# Análisis de diversidad - Muestras de medio continental
+
+## Diversidad Alfa
+
+En primer lugar se han analizado las diferencias que existen entre los marcadores 18S y COI a nivel de marcador metataxonómico. Estos resultados no son comparables con las asignaciones taxonómicas clásicas debido a la propia mecánica inherente a la obtención de ASVs, por ello, esto se analizará más adelante teniendo en cuenta estos factores.  
+Un paso previo que se ha seguido a la hora de analizar la diversidad alfa ha sido el agrupar las réplicas técnicas de cada muestra. Además, también se han filtrado aquellas ASVs que se encontrasen en menos de un 0.1% en cada muestra. Las pruebas estadísticas se han realizado teniendo en consideración que son muestras apareadas, ya que los procesos de secuenciación (y también de visualización taxonómica), se realizaron a través de la misma muestra.  
+
+
+```{r fig1, fig.width = 12, fig.height=5, dpi = 300,fig.align='center',fig.cap = "Boxplot de los resultados de diversidad para cada una de las muestras, diferenciadas por marcador. Los índices de estudio han sido: ASVs observadas, Shannon, Simpson y Fisher. Los p-valores para el test de Wilcoxon (U-test) para cada índice se encuentran indicados abajo en la figura"}
+amp_c <- amp_filter_samples(ampData, medio == "Continental")
+amp_cmb <- amp_filter_samples(amp_c, metodo == "Metabarcoding")
+amp_cmbm <- amp_merge_replicates(amp_cmb, "muestramarcador", round = "up")
+amp_cmbm <- filter_otus(amp_cmbm, 0.1) # Filtrado para aumentar la fiabilidad
+# de la muestra (https://www.frontiersin.org/articles/10.3389/fcimb.2023.1165295/full)
+meths <- c("Observed", "Shannon", 
+           "Simpson", "Fisher")
+alfa_c <- cbind.data.frame(
+  amp_cmbm$metadata,
+  estimate_richness(amp2phy(amp_cmbm), measures = meths))
+alfa_c_p <- alfa_c %>% 
+  pivot_longer(!names(amp_cmbm$metadata), names_to = "index")
+alfa_c_p %>%
+  mutate(index = factor(alfa_c_p$index, levels = unique(alfa_c_p$index))) %>%
+  arrange(marcador, muestra) %>%
+  ggplot(aes(x = marcador, y = value, color = marcador)) +
+  geom_boxplot() +
+  geom_boxplot(aes(fill = marcador), alpha = .2) + 
+  facet_wrap(index~., scales = "free_y", nrow = 1) +
+  stat_compare_means(label.y.npc = "bottom", paired = T) +
+  scale_color_brewer(palette = "Set2") + 
+  scale_fill_brewer(palette = "Set2") +
+  xlab("Marcador") + 
+  labs(color = "Marcador", fill = "Marcador") +
+  ylab("Valor") +
+  theme_bw()
+# 
+# for (i in seq(unique(alfa_c_p$index))){
+#   name <- unique(alfa_c_p$index)[i]
+#   new <- alfa_c_p %>% filter(index == name)
+#   pval <- wilcox.test(value ~ marcador, data = new)$p.val
+#   if (i == 1){
+#     df_wilcox <- data.frame(Index = name, Wilcox.pval = pval)
+#     
+#   } else{
+#     df_wilcox <- rbind.data.frame(df_wilcox, 
+#                                   data.frame(Index = name, Wilcox.pval = pval))
+#     
+#   }
+# }
+#   
+# knitr::kable(df_wilcox, caption = "p-valores correspondientes al U-test para las
+#              distintas medidas o índices de diversidad", digits = 4) 
+# Esto lo hice al principio para hacer una tabla con los p-valores, como se
+# va a complicar el asunto prefiero anotarlos en la figura, que va a ser más
+# fácil y más práctico, pero dejo el código por si acaso.
+```
+Por lo que se puede observar en la **Figura \ref{fig:fig1}**, el marcador COI recoge de manera significativa más diversidad para todos los índices estudiados. No obstante, será necesario revisar si esta diversidad es indicativa realmente de los especímenes que hay en la muestra.  
+
+Con este objetivo, se procede a incluir los resultados de asignación taxonómica visual. En este caso se tendrá en consideración únicamente los resultados de las ASVs a nivel taxonómico de familia para los datos de Metataxonómica, ya que en la visualización taxonómica se descarta cualquier individuo que no es posible identificar a este nivel. Aun así, hay que tener en consideración que la técnica de Metataxonómica también consigue más resolución, por lo que hay que tratar de agregar los resultados también por familia. Por último, para que las muestras sean estadísticamente comparables, se han rarefactado todas las muestras al mismo nivel. Esta rarefacción realiza muestreos aleatorios de todas las muestras hasta llegar al nivel deseado, que en este caso ha sido hasta llegar al número de individuos de la muestra con menos conteos. De esta manera, conseguimos que los índices de diversidad sean comparables. Esta metodología de rarefacción se realizará para todos los análisis en los que sea necesario establecer pruebas estadísticas posteriores, las cuales todas se realizan teniendo en consideración que los datos están apareados.  
+
+En la **Figura \ref{fig:fig2}** se pueden observar las diferencias en diversidad entre las metodologías tratadas.  
+
+```{r fig2, results='hide', fig.show = TRUE, fig.width = 12, fig.height=5, dpi = 300,fig.align='center',fig.cap = "Boxplot de los resultados de diversidad para cada una de las muestras, diferenciadas por marcador. Los índices de estudio han sido: Familias observadas, Shannon, Simpson y Fisher. Los p-valores del U-test por pares y Kruskal-Wallis para cada índice se encuentran anotados en la figura encima de las cajas y al fondo de la figura, respectivamente."}
+amp_c <- amp_filter_samples(ampData, medio == "Continental")
+amp_cm <- amp_merge_replicates(amp_c, "muestramarcador", round = "up")
+# ampvis mezcla muy bien replicados (en phyloseq está buggeado) pero para los
+# filtros taxonómicos es mejor phyloseq y  el agregado de taxones se hace con
+# microbiome que utiliza solo objetos phyloseq, hay que estar mareando la perdiz 
+# para poder hacer esto
+seed = 1234
+
+phy_cm <- amp2phy(amp_cm)
+phy_cmf <- subset_taxa(phy_cm, Family != "")
+phy_cmfa <- aggregate_taxa(phy_cmf, level = "Family")
+phy_cmfa_r <- rarefy_even_depth(phy_cmfa, rngseed = seed)
+# La rarefacción provoca que las muestras sean más comparables entre sí al 
+# realizar muestreos al nivel que detectamos individuos en visu
+
+alfa_ca <- cbind.data.frame(
+  sample_data(phy_cmfa_r), 
+  estimate_richness(phy_cmfa_r, measures = meths))
+
+alfa_cap <- alfa_ca %>% 
+  pivot_longer(!names(amp_cm$metadata), names_to = "index")
+
+comp <- list(
+  c("18S", "COI"),
+  c("COI", "Visu"),
+  c("18S", "Visu")
+)
+
+alfa_cap %>%
+  mutate(index = factor(alfa_cap$index, levels = unique(alfa_cap$index))) %>%
+  arrange(marcador, muestra) %>%
+  ggplot(aes(x = marcador, y = value, color = marcador)) +
+  geom_boxplot() +
+  geom_boxplot(aes(fill = marcador), alpha = .2) + 
+  facet_wrap(index~., scales = "free_y", nrow = 1) +
+  stat_compare_means(label.y.npc = "bottom",
+                     method.args = list(paired = T)) + 
+  stat_compare_means(comparisons = comp,
+                     tip.length = .01,
+                     method.args = list(paired = T)) +
+  scale_color_brewer(palette = "Set2") + 
+  scale_fill_brewer(palette = "Set2") +
+  xlab("Metodología") + 
+  ylab("Valor") +
+  labs(color = "Marcador", fill = "Marcador") +
+  theme_bw()
+
+```
+  
+  
+Los resultados de este análisis nos permiten ver que, de normal, se puede observar mayor diversidad utilizando las técnicas de metataxonómica con los distintos marcadores. Los resultados de las pruebas de Kruskal-Wallis muestran que existen diferencias significativas entre la composición de la diversidad entre todos los marcadores y la asignación taxonómica visual para todos los índices de diversidad que se han estudiado. Aun así, se puede observar que no existen diferencias significativas entre los resultados para el 18S y la asignación taxonómica visual. Además, siguiendo en la misma línea que en el resultado anterior, a excepción de con el índice de Fisher y el número de familias observadas, el gen COI recoge más diversidad que el gen 18S.  
+
+
+También es interesante realizar la comparativa a nivel de cuáles de estas familias se han detectado para cada una de las metodologías. Para ese propósito, en la **Figura \ref{fig:fig3}** se ha realizado un Diagrama de Venn con las familias que se han identificado en todas las muestras, en función de la metodología o marcador utilizado.  
+
+```{r fig3, fig.show = TRUE, fig.width =4 , fig.height=4, dpi = 300,fig.align='center',fig.cap = "Diagrama de Venn de todas las familias identificadas en función del marcador."}
+
+## No he encontrado una manera mejor de hacer esto sinceramente
+# Juntamos los datos de tax y otus
+amp_cmfa <- amp_load(phy_cmfa)
+amp_cmfa <- filter_otus(amp_cmfa, 0.1) # voy a filtrar también aquí porque sino
+# se va un poco de madre, y sinceramente las otus menores al .1% son un poco estafa
+data_venn <- merge(amp_cmfa$abund, amp_cmfa$tax, by = 0)
+# data_venn <- merge(phy_cmfa@otu_table@.Data, phy_cmfa@tax_table@.Data, by = 0)
+# Separamos en objetos cada una de las taxonomías asociadas a cada marcador
+coi <- data_venn[,c(colnames(data_venn)[grep("COI", colnames(data_venn))], "Family")]
+visu <- data_venn[,c(colnames(data_venn)[grep("Visu", colnames(data_venn))], "Family")]
+s18 <- data_venn[,c(colnames(data_venn)[grep("18S", colnames(data_venn))], "Family")]
+# Extraemos las familias que hayan sido detectadas al menos en una muestra una vez
+coi_f <- unique(coi[rowSums(coi[,1:length(coi) -1]) > 0,"Family"])
+visu_f <- unique(visu[rowSums(visu[,1:length(visu) -1]) > 0,"Family"])
+s18_f <- unique(s18[rowSums(s18[,1:length(s18) -1]) > 0,"Family"])
+# Generamos la lista para el Venn
+x = list(
+  "COI" = coi_f,
+  "18S" = s18_f,
+  "Visu" = visu_f
+  )
+
+ggVennDiagram(
+  x,
+  label_alpha = 0
+) +
+  scale_fill_gradient("nº familias",low = "white", high = "red") + 
+  scale_color_manual(values = c("black", "black", "black")) +
+  # labs(title = "Medio continental") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        legend.position = "none")
+
+```
+En primer lugar, se puede apreciar que existe una gran coincidencia entre las familias detectadas por asignación visual y aquellas detectadas por Metataxonómica, siendo que de las 18 familias que se han detectado en la metodología de asignación taxonómica visual, coinciden un 78% (14) con los dos indicadores genéticos, y un 83% (15) de las familias si contamos los marcadores genéticos de manera individual. Únicamente se ha perdido la información de 3 de las familias identificadas visualmente.  
+
+No obstante, también se puede observar que entre los dos marcadores genéticos existen algunas discrepancias, ya que coinciden en el 51% de las familias identificadas. De esta manera, se han identificado 15 familias de macroinvertebrados exclusivas del gen COI y 10 del gen 18S.  
+
+```{r fig4, fig.show = TRUE, fig.width = 6, fig.height=5, dpi = 300,fig.align='center',fig.cap = "Diagrama de cajas de las 10 familias más abundantes para cada metodología. La abundancia viene expresada en forma de abundancia relativa."}
+amp_cmfa_r <- amp_load(phy_cmfa_r)
+# amp_cmfa <- amp_load(phy_cmfa)
+# He creado los dos objetos pero sinceramente creo que para este caso, como 
+# estamos viendo cualitativamente las familias, no es necesario el dataset
+# rarefactado. Eso solo para cuando se vayan a sacar significaciones estadísticas.
+
+p <- amp_boxplot(amp_cmfa,
+            tax_aggregate = "Family",
+            normalise = T,
+            group_by = "marcador",
+            tax_show = 10, 
+            plot_log = F) +
+  geom_boxplot(aes(fill = .Group), alpha = .2)+
+  scale_color_brewer(palette = "Set2") + 
+  scale_fill_brewer(palette = "Set2", guide = "none") +
+  # stat_compare_means(label.y.npc = "bottom") + # se ve bien feo en este gráfico
+  labs(color = "Marcador",
+       y = "Abundancia relativa (%)")
+
+p
+```
+
+En la **Figura \ref{fig:fig4}** se puede observar que la composición a nivel de abundancia para las familias más representadas en la muestra, en general parece tener una buena correspondencia, a excepción de algunas de las familias detectadas, que, en bastantes de los casos se ven sobrerrepresentadas en la asignación taxonómica clásica, como son los casos de Baetidae e Hydropsychidae. Esto puede indicar fallos en la asignación taxonómica de las secuencias de estos individuos, lo cuál puede indicar que la base de datos utilizada todavía podría ayudarse de la subida y actualización de más secuencias de estos organismos, o incluso puede ser debido al poco curado de las secuencias existentes en el NCBI.  
+
+## Diversidad Beta  
+
+Otro de los apartados de interés de este estudio es que las muestras fueron recogidas en 2 puntos distintos: Antes y Después de una depuradora. En este ensayo también se quiere comprobar si existen diferencias en diversidad para estos dos puntos de muestreo. Para poder demostrar que la composición en diversidad biológica entre estos puntos, es necesario la realización del cálculo de distancias entre las muestras y posteriormente las representaciones de ordenación. La matriz de distancias se ha calculado mediante la metodología de Bray-Curtis, típica en este tipo de estudios. Con la matriz de distancias de Bray-Curtis, se ha realizado un NMDS (non-metric multidimensional scaling) para visualizar la separación de estas muestras a través de dicho cálculo de distancias (**Figura \ref{fig:fig5}A**), y también, se ha realizado un análisis de redundancia (RDA) utilizando el Punto de muestreo como variable de restricción para comprobar cuánta explicabilidad a la variación aporta esta variable al conjunto de datos (**Figura \ref{fig:fig5}B**). En este último caso, se ha utilizado la transformada de Hellinger sobre la matriz de distancias, la cuál permite reducir el impacto de las especies menos abundantes, consiguiendo un resultado más explicativo a nivel ecológico.
+
+```{r fig5, fig.show = TRUE, fig.width = 10, fig.height=4, dpi = 300, fig.align='center',fig.cap = "Análisis de ordenación mediante nMDS (A) y RDA utilizando como variable de restricción el punto de muestreo (B). Se ha anotado la región que delimita los puntos de muestreo y los distintos marcadores en la ordenación."}
+amp_cmfa_r$metadata$Puntomarcador = 
+  factor(paste(
+    amp_cmfa_r$metadata$Punto,
+    amp_cmfa_r$metadata$marcador,
+    sep = "-"
+  ), levels = c(
+    "Antes depuradora-Visu",
+    "Después depuradora-Visu",
+    "Antes depuradora-18S",
+    "Después depuradora-18S",
+    "Antes depuradora-COI",
+    "Después depuradora-COI"
+  ))
+amp_cmfa$metadata$Puntomarcador = 
+  factor(paste(
+    amp_cmfa$metadata$Punto,
+    amp_cmfa$metadata$marcador,
+    sep = "-"
+  ), levels = c(
+    "Antes depuradora-Visu",
+    "Después depuradora-Visu",
+    "Antes depuradora-18S",
+    "Después depuradora-18S",
+    "Antes depuradora-COI",
+    "Después depuradora-COI"
+  ))
+p1 <- amp_ordinate(amp_cmfa_r, # stress: 0.127
+             type = "nmds",
+             filter_species = 0, 
+             distmeasure = "bray",
+             transform = "none",
+             sample_color_by = "Puntomarcador",
+             sample_colorframe = T,
+             sample_shape_by = "marcador"
+             ) +
+  labs(color = "Punto - Marcador",
+       fill = "Punto - Marcador") +
+  scale_color_tableau(palette = "Tableau 20") +
+  scale_fill_tableau(palette = "Tableau 20")
+p2 <- amp_ordinate(amp_cmfa_r,
+             type = "rda",
+             filter_species = 0, 
+             distmeasure = "bray",
+             constrain = c("Punto"),
+             transform = "hellinger",
+             sample_color_by = "Puntomarcador",
+             sample_colorframe = T,
+             sample_shape_by = "marcador") +
+  scale_color_tableau(palette = "Tableau 20") +
+  scale_fill_tableau(palette = "Tableau 20")
+leg <- get_legend(p1)
+
+grph <- plot_grid(
+  p1 + theme(legend.position="none"),
+  p2 + theme(legend.position="none"),
+  align = 'vh',
+  labels = "AUTO",
+  hjust = -1,
+  nrow = 1
+)
+
+plot_grid(
+  grph, leg,
+  rel_widths = c(2,.5)
+)
+
+```
+  
+  
+El NMDS de la **Figura \ref{fig:fig5}A** ha recogido aparentemente los distintos grupos que componen la muestra, que se han anotado en también por marcador. El valor del estrés para el NMDS es de 0.127, lo cual implica que es un buen fit.  
+
+En primer lugar, vemos que las muestras analizadas mediante Metabarcoding se separan claramente de las muestras analizadas por visualización taxonómica clásica.  
+
+También podemos observar que las únicas muestras que parecen generar dos grupos separados con respecto al punto de muestreo, son las del marcador 18S. En COI, también parece que conseguimos separación entre los grupos formados por el punto de muestreo, a excepción de una muestra. No obstante, en el caso de la asignación taxonómica clásica, no parece existir apenas diferenciación entre las muestras de Antes de la depuradora y Después de la depuradora.  
+
+Por ello, también se ha realizado un análisis de redundancia (RDA) tomando como variable de restricción el Punto de muestreo, con la intención de buscar la variación de la diversidad en función a esta variable. De esta manera, en la **Figura \ref{fig:fig5}B** sí que podemos observar una separación total entre los dos puntos de interés analizados, aunque el componente del RDA no explica apenas variación (5.5%).  
+
+En general, en ambos análisis se puede observar que los marcadores genéticos ofrecen una mejor determinación de los puntos de muestreo, ya que la asignación taxonómica mediante visualización no consigue tanto éxito en la separación de las muestras dependiendo del punto como es en el caso de los marcadores moleculares. De hecho, aun en el RDA, aunque las muestras se separan según el punto bien, existe menor distancia entre los puntos que para los marcadores moleculares.  
+
+De entre los marcadores genéticos, el gen 18S parece recoger mejor las diferencias entre las muestras que el COI, ya que en el NMDS algunas muestras se solapan con la región del punto contrario.  
+
+Con estos resultados se podría determinar que apenas existen diferencias entre los puntos de muestreo analizados, aunque las técnicas de asignación taxonómica utilizando marcadores moleculares parece conseguir una mejor resolución para determinar si existen estas diferencias.  
+
+Con el fin de recoger estos hechos a nivel estadístico, se han realizado PERMANOVAS en distintas condiciones. Tal como se puede ver en la **Tabla \ref{tab:tab1}**, para el total de todas las muestras analizadas, las diferencias por el punto de muestreo no son estadísticamente significativas, al igual que para la estacionalidad (Mes). En el conjunto de todas las muestras, son significativamente distintos los marcadores (18S, COI y Visu) al igual que el Método, que es prácticamente la misma variable pero combinando los marcadores genéticos, lo cuál era de esperar teniendo en consideración los resultados anteriores.  
+
+También se han separado las muestras de las tandas por método, y se han vuelto a realizar algunos tests estadísticos. En el caso del Punto de muestreo para las muestras de metabarcoding, sí que se obtienen diferencias estadísticamente significativas, mientras que en las muestras determinadas por asignación taxonómica por visualización no. Lo cuál de nuevo nos parece indicar que las técnicas de metabarcoding tienen una mayor resolución en la detección de la diversidad taxonómica, o al menos lo suficientemente mayor como para poder distinguir entre los puntos de muestreo. 
+Además, también vemos que existen diferencias muy significativas entre los propios marcadores genéticos. En vistas de que el gen COI por lo general ha recogido más diversidad que el 18S, se podría determinar que es más útil realizar los experimentos utilizando únicamente este marcador. No obstante, por lo que hemos visto en el resto de resultados, parece que la información del 18S no es exclusivamente solapante con la del COI, lo cuál parece indicar que lo ideal sería utilizar la metodología de manera conjunta, e incluso llegar a agrupar la información que agrupan ambos marcadores para cada muestra en particular.  
+
+
+
+```{r tab1}
+# PERMANOVAS
+## También toca hacer la estadística, no solo van a ser dibujitos.
+# Punto
+bray <- distance(phy_cmfa_r, method = "bray")
+df <- as(sample_data(phy_cmfa_r), "data.frame") # por algun motivo no funciona con as.data.frame
+res1 <- adonis2(bray ~ Punto, data = df) # 0.196
+res2 <- adonis2(bray ~ mes, data = df) # 0.188
+res3 <- adonis2(bray ~ marcador, data = df) # <0.001***
+res4 <- adonis2(bray ~ metodo, data = df) # <0.001***
+
+
+### separando
+phy_cmfa_mb <- subset_samples(phy_cmfa, metodo == "Metabarcoding")
+bray_mb <- distance(phy_cmfa_mb, method = "bray")
+df_mb <- as(sample_data(phy_cmfa_mb), "data.frame")
+phy_cmfa_visu <- subset_samples(phy_cmfa, metodo == "Visualización")
+bray_visu <- distance(phy_cmfa_visu, method = "bray")
+df_visu <- as(sample_data(phy_cmfa_visu), "data.frame")
+
+res5 <- adonis2(bray_mb ~ Punto, data = df_mb) # 0.02*
+res6 <- adonis2(bray_visu ~ Punto, data = df_visu) # 0.265 jejeje
+
+res7 <- adonis2(bray_mb ~ marcador, data = df_mb) # 0.003** bueno, era de esperar ngl
+
+res_list <- list(res1, res2, res3, res4, res5, res6, res7)
+
+for (i in seq(res_list)){
+  res_list[[i]] <- rownames_to_column(as.data.frame(res_list[[i]]), " ")
+}
+res_final <- list_rbind(res_list) %>% 
+  mutate("F" = round(.$F, digits = 3)) %>%
+  replace(is.na(.), " ")
+kbl(res_final, caption = "Resultados PERMANOVA",
+    booktabs = T, align = "c", digits = 3) %>%
+  kable_classic(full_width = F) %>%
+  kable_styling(latex_options = c("striped", "HOLD_position", "repeat_header")) %>%
+  pack_rows("Punto (T)", 1,3) %>%
+  pack_rows("Mes (T)", 4, 6) %>%
+  pack_rows("Marcador (T)", 7,9) %>%
+  pack_rows("Método (T)", 10, 12) %>%
+  pack_rows("Punto (MB)", 13, 15) %>%
+  pack_rows("Punto (V)", 16, 18) %>%
+  pack_rows("Marcador (MB)", 19, 21) %>%
+  column_spec(6, bold = TRUE) %>%
+  footnote(general = "Abreviaciones. ",
+           number = c("T: Total de muestras;",
+                      "MB: Metabarcoding;",
+                      "V: Visualización taxonómica;"))
+```
+
+## Indicadores de calidad bióticos (IBMWP)  
+
+El índice IBMWP (*Iberian BioMonitoring Working Party*) está basado en los distintos límites de tolerancia que tienen las familias de macroinvertebrados acuáticos a alteraciones en las condiciones ambientales de los ríos en los que viven. Así, frente a una determinada alteración (un vertido, una extracción de áridos…), los organismos más sensibles pueden no soportar las nuevas condiciones y desaparecer del medio, mientras que los más tolerantes pueden no verse afectados e incluso aumentar su presencia. Esto se verá reflejado en la muestra de organismos bentónicos que tomemos en un río. Se basa en un cálculo de presencia/ausencia de las familias de macroinvertebrados, donde cada familia posee una puntuación distinta dependiendo de su sensibilidad a los cambios ambientales. Una vez identificadas las familias y la puntuación de las mismas de una muestra, se determina la calidad del agua del río dependiendo del ecotipo al que pertenezca (clasificación del Gobierno de España).  
+
+En el caso del río a estudio en este experimento, pertenece al ecotipo con código R-T09, el cuál tiene los siguientes valores de corte para el IBMWP:  
+
+
+- **Muy Bueno/Bueno**: 159
+- **Bueno/Moderado**: 96
+- **Moderado/Deficiente**: 57
+- **Deficiente/Malo**: 25  
+
+
+Para este trabajo se ha desarrollado una rutina de cálculo que permite la obtención del IBMWP a partir de los ensayos de secuenciación.  
+Además, se han probado distintas aproximaciones al cálculo del IBMWP con los datos de secuenciación para ver su comparación con los datos de asignación taxonómica visual.  
+
+Las distintas condiciones que se han probado han sido (a nivel de muestra):  
+
+- Combinación de todas las réplicas de cada muestra y cálculo individual de cada IBMWP (**Figura \ref{fig:fig6}A**).
+- Combinación de los marcadores por cada réplica técnica y media de la puntuación del IBMWP de las réplicas (**Figura \ref{fig:fig6}B**).
+- Media del cálculo individual del IBMWP por cada réplica y marcador (**Figura \ref{fig:fig6}C**).  
+
+Los resultados entre las metodologías se han comparado mediante tests de la T de Student con muestras apareadas.  
+
+
+
+```{r, eval = FALSE}
+# Al unir todos los phyloseq en uno se carga los taxones que no le gustan, aka
+# los que no metí en Visu, AKA justo los que se necesitan para el IBMWP, 
+# así que voy a crear otra lista de los phyloseq de mb únicamente para hacer esto
+physeq_onlymb <- join_physeq_list(phy_list_mb)
+phy_taxmb <- subset_samples(physeq_onlymb, medio == "Continental")
+# Para agregar los datos de 18S y COI de las réplicas técnicas si fuese necesario
+phy_taxmb@sam_data$muestrareplica <- paste0(
+  phy_taxmb@sam_data$muestra,
+  phy_taxmb@sam_data$replica
+  )
+# Referencias
+## Referencia ##
+IBMWP_file <- "/home/BioinfoShare/References/IBMWP_list_reffile.tsv"
+IBMWP_ref <- read.delim(IBMWP_file, header = T, sep = "\t")
+IBMWP_rank <- as.vector(unique(IBMWP_ref$Rank))
+
+## voy a copiar y pegar aquí código legacy de cómo se hace el IBMWP, aunque
+## lo he corrido desde otro script y voy a guardar el df final y cargarlo
+## en otro chunk porque tarda literal una hora en sacar las distintos cálculos
+## (porque no se vectorizarlo, lo siento)
+physeqData <- phy_taxmb
+selected_samples <- physeqData@sam_data$sample.id
+
+# Como me da en la nariz que cada bicho que te encuentras sólo se anota una vez, pues voy a dejar hecho el por si acaso.  
+tax_table <- as.data.frame(physeqData@tax_table@.Data)
+tax_red <-tax_table[IBMWP_rank]
+otu_table <- as.data.frame(physeqData@otu_table@.Data)
+
+com_table <- merge(otu_table, tax_red, by = 0, all.x = T, all.y = F)
+com_red <- com_table[!is.na(com_table$Superorder),]
+com_red <- com_red[,-1] # Quito las OTUs
+
+
+### Voy a tener que hacer una vaina para poder agrupar las muestras con sus réplicas
+whole_samples <- unique(metadata_df$muestra)
+
+
+for (i in seq(whole_samples)){
+  print(grep(whole_samples[i], colnames(com_red)))
+  com_red[, whole_samples[i]] <- apply(as.data.frame(com_red[,grep(whole_samples[i], colnames(com_red))]), 1, function(x) sum(x, na.rm = F))
+
+}
+com_red <- relocate(com_red, whole_samples)
+selected_samples <- physeqData@sam_data$sample.id
+nsam <- length(c(selected_samples, whole_samples))
+# nsam <- 1
+df_res <- data.frame()
+df_cant <- data.frame()
+
+
+
+for (i in seq(nsam)){
+  df <- com_red[,c(i, ( (nsam+1):length(com_red) ))]
+  df <- subset(df, df[,1] > 1)
+  
+  min_perc = sum(df[,1])
+  
+  result_sample <- names(df)[1]
+  result_score <- 0
+  vistos <- c()
+  if (nrow(df) == 0) {
+    df_res <- rbind(df_res, c(result_sample, NA, NA))
+    print(result_sample)
+    next
+  }
+  for (j in seq(nrow(df))){
+    for (k in seq(nrow(IBMWP_ref))){
+      if (!is.na(df[j,IBMWP_ref[k,"Rank"]]) & df[j,IBMWP_ref[k,"Rank"]] == IBMWP_ref[k,"Taxa"]) {
+        if (!(df[j,IBMWP_ref[k,"Rank"]] %in% vistos)){
+        result_score <- result_score + IBMWP_ref[k, "Score"]
+        vistos <- c(vistos, df[j,IBMWP_ref[k,"Rank"]])
+        }
+        df_cant <- rbind(df_cant, c(df[j,1],df[j,IBMWP_ref[k,"Rank"]]))
+      }
+    }
+  }
+  if (is.null(vistos)){
+    df_res <- rbind(df_res, c(result_sample, result_score, "NA"))
+  } else{
+    vistos = unique(vistos)
+    df_res <- rbind(df_res, c(result_sample, result_score, paste(vistos, collapse = ", ")))
+    
+  }
+  
+}
+
+colnames(df_res) <- c("Sample", "IBMWP_Score", "Observed_Taxa")
+colnames(df_cant) <- c("Count", "Observed_Taxa")
+
+df_cant$Count <- as.numeric(df_cant$Count)
+df_res$IBMWP_Score <- as.numeric(df_res$IBMWP_Score)
+
+df_cant_2 <- df_cant %>% # este en verdad vale bien de nada ya
+  group_by(Observed_Taxa) %>% 
+  summarise(total_count = sum(Count)) %>%
+  mutate(relative = (total_count * 100) / sum(total_count)) %>%
+  arrange(desc(relative))
+
+write.table(
+  df_res,
+  file = "IBMWP_AllSamples.tsv",
+  quote = F,
+  sep = "\t",
+  row.names = F,
+  col.names = T
+)
+```
+
+```{r fig6, fig.show = TRUE, fig.width = 8, fig.height=6, dpi = 300, fig.align='center',fig.cap = "Comparativa de las puntuaciones IBMWP entre la técnica de Metabarcoding (Rojo) y asignación taxonómica mediante visualización (Azul). Las líneas negras unen las muestras homólogas de ambas técnicas. Se encuentra anotado el p-valor para los t-test con muestras apareadas. A. Combinación de todas las réplicas de cada muestra y cálculo individual de cada IBMWP; B. Combinación de los marcadores por cada réplica técnica y media de la puntuación del IBMWP de las réplicas; C. Media del cálculo individual del IBMWP por cada réplica y marcador."}
+
+# Ahora con los resultados
+df_res <- read.delim("IBMWP_AllSamples.tsv", sep = "\t", header = T)
+# leo los resultados del Limne de IBMWP (no me fío de hacerlo con mi script,
+# por si veo que está mal, de nuevo lo siento).
+visu_res <- read.delim("tabla_ibmwp_limne.tsv", sep = "\t", header = T)
+
+## sliceo los resultados según lo que se quiere ver/analizar
+i <- 1
+j <- 9
+k <- 117
+df_comb <- df_res[i:j,]
+df_cmarc <- df_res[(j+1):k,]
+df_crep <- df_res[(k+1):nrow(df_res),]
+## Combinado de muestras
+df_comb$Metodo <- "Metabarcoding"
+df_comb$Sample_Method <- paste0(df_comb$Sample, "-MB")
+visu_res$Metodo <- "Visualización"
+visu_res$Sample_Method <- paste0(visu_res$Sample, "-Visu")
+
+meta <- as(physeq_visu_c@sam_data[,c("muestra", "Punto")], "data.frame")
+colnames(meta) <- c("Sample", "Punto")
+
+df_ibmwp <- rbind(df_comb, visu_res) %>% inner_join(meta, by = "Sample") %>%
+  arrange(Metodo, Sample)
+
+p1 <-df_ibmwp %>%
+  ggpaired(x = "Metodo", y = "IBMWP_Score",
+         color = "Metodo") +
+  # facet_grid(.~Punto) + 
+  scale_color_brewer(palette = "Set1") +
+  stat_compare_means(method = "t.test", paired = T, label.y = 30) +
+  labs(x = "Metodología",
+       y = "Puntuación IBMWP")
+leg <- get_legend(p1)
+## Debería seguir haciéndolo para el resto aAaaaAAAAAaAAAaaaaA
+
+# Media de las réplicas combinando marcadores 
+df_cmarc$Sample <- paste0(str_split_fixed(df_cmarc$Sample, "C", 2)[,1], "C")
+df_cmarc_g <- df_cmarc %>% 
+  mutate(Sample_Method = paste0(Sample, "-MB")) %>%
+  group_by(Sample, Sample_Method) %>%
+  summarise(IBMWP_Score = mean(IBMWP_Score)) %>%
+  mutate(Metodo = "Metabarcoding") %>%
+  relocate(Metodo, .before = Sample_Method) %>%
+  relocate(IBMWP_Score, .before = Metodo)
+  
+
+df_ibmwp_2 <- rbind(df_cmarc_g, 
+      select(visu_res, -c(Observed_Taxa))) %>%
+  inner_join(meta, by = "Sample") %>% 
+  arrange(Metodo, Sample)
+
+p2 <- df_ibmwp_2 %>%
+  ggpaired(x = "Metodo", y = "IBMWP_Score",
+         color = "Metodo") +
+  # facet_grid(.~Punto) + 
+  scale_color_brewer(palette = "Set1") +
+  stat_compare_means(method = "t.test", paired = T, label.y = 30) +
+  labs(x = "Metodología",
+       y = "Puntuación IBMWP")
+
+## Media de las réplicas (las 24)
+df_crep$Sample <- paste0(str_split_fixed(df_crep$Sample, "C", 2)[,1], "C")
+df_crep_g <- df_crep %>% 
+  mutate(Sample_Method = paste0(Sample, "-MB")) %>%
+  group_by(Sample, Sample_Method) %>%
+  summarise(IBMWP_Score = mean(IBMWP_Score)) %>%
+  mutate(Metodo = "Metabarcoding") %>%
+  relocate(Metodo, .before = Sample_Method) %>%
+  relocate(IBMWP_Score, .before = Metodo)
+
+df_ibmwp_3 <- rbind(df_crep_g, 
+      select(visu_res, -c(Observed_Taxa))) %>%
+  inner_join(meta, by = "Sample") %>% 
+  arrange(Metodo, Sample)
+
+
+p3 <- df_ibmwp_3 %>%
+  ggpaired(x = "Metodo", y = "IBMWP_Score",
+         color = "Metodo") +
+  # facet_grid(.~Punto) + 
+  scale_color_brewer(palette = "Set1") +
+  stat_compare_means(method = "t.test", paired = T, label.y = 30) +
+  labs(x = "Metodología",
+       y = "Puntuación IBMWP") 
+
+p1 <- p1 + theme(legend.position = "none")
+p2 <- p2 + theme(legend.position = "none")
+p3 <- p3 + theme(legend.position = "none")
+# p_t <- plot_grid(
+#   p1 ,
+#   p2,
+#   p3,
+#   align = 'vh',
+#   labels = "AUTO",
+#   hjust = -1,
+#   ncol = 2,
+#   nrow = 2
+# )
+
+p_t <- plot_grid(
+  plot_grid(p1, p2, nrow = 1, ncol = 2, labels = c("A", "B")),
+  plot_grid(NULL, p3, NULL, nrow = 1, labels = c("", "C", ""),
+            rel_widths = c(0.45, 1, 0.45)),
+  nrow = 2
+)
+
+grph <- plot_grid(
+  leg,
+  p_t,
+  rel_heights = c(.2, 3), 
+  ncol = 1,
+  nrow = 2
+  
+)
+grph
+```
+  
+  
+En el caso de este análisis, nos interesa que las muestras den resultados comparables, lo que quiere decir que necesitamos el caso en el que los resultados no sean estadísticamente significativos. Este es el caso únicamente cuando el resultado del IBMWP por muestra se ha calculado realizando la media del cálculo individual para cada una de las réplicas técnicas (n = 24). Es con estas condiciones que todas las muestras (tanto de metabarcoding como de Visualización) cuando el resultado del IBMPW se agrupa en Deficiente, en el resto de aproximaciones se cruzan los umbrales de Moderado en ciertas ocasiones, e incluso, en el caso del cálculo del IBMWP habiendo agrupado previamente los resultados taxonómicos de todas las réplicas todas las muestras cambian de categoría a estado de calidad Moderado.  
+
+
+# Análisis de diversidad - Muestras de medio marino  
+
+En cuanto a las muestras de medio marino, usualmente durante los estudios de diversidad biológica los análisis se realizan a nivel de especies (aunque también se suelen utilizar los géneros si la especie no se consigue determinar). Por lo que será el mayor factor a tener en cuenta durante los análisis también con las tandas de secuenciación.  
+
+```{r}
+# Para esto, a nivel programático vamos a tener en consideración este aspecto
+# añadiendo los "sp." a las ASVs que hayan llegado a género, pero no a especie
+# y luego agregando en la columna de especie tanto el género como la especie 
+# (esto sobre todo para que salga más bonito, bueno y luego para el AMBI y 
+#  demás movidas).
+# Lo voy a hacer con el ampData por facilidad, pero lo debería hacer con el 
+# phyloseq sinceramente, espero que no me de problemas a futuro. Mucho ánimo.
+
+amp_m <- amp_filter_samples(ampData, medio == "Marino")
+amp_m$tax[which(amp_m$tax$Genus != "" & amp_m$tax$Species == ""), "Species"] = "sp."
+amp_m$tax$Species = paste(
+  amp_m$tax$Genus,
+  amp_m$tax$Species,
+  sep = " ")
+amp_m$tax[which(amp_m$tax$Species == " "), "Species"] = "" # esto es lioso pero
+# no me apetece complicar más el código del paste, así funciona el asunto
+
+# ya esta, ahora con esto el amp_m esta nice
+```
+
+## Diversidad Alfa
+
+En primer lugar se han analizado las diferencias que existen entre los marcadores 18S y COI a nivel de marcador metataxonómico. Estos resultados no son comparables con las asignaciones taxonómicas clásicas debido a la propia mecánica inherente a la obtención de ASVs, por ello, esto se analizará más adelante teniendo en cuenta estos factores.  
+Un paso previo que se ha seguido a la hora de analizar la diversidad alfa ha sido el agrupar las réplicas técnicas de cada muestra. Además, también se han filtrado aquellas ASVs que se encontrasen en menos de un 0.1% en cada muestra. Las pruebas estadísticas se han realizado teniendo en consideración que son muestras apareadas, ya que los procesos de secuenciación
+(y también de visualización taxonómica), se realizaron a través de la misma muestra.  
+
+
+```{r fig7, fig.width = 12, fig.height=5, dpi = 300,fig.align='center',fig.cap = "Boxplot de los resultados de diversidad para cada una de las muestras, diferenciadas por marcador. Los índices de estudio han sido: ASVs observadas, Shannon, Simpson, invSimpson y Fisher. Los p-valores para el test de Wilcoxon (U-test) para cada índice se encuentran indicados abajo en la figura"}
+amp_mmb <- amp_filter_samples(amp_m, metodo == "Metabarcoding")
+amp_mmbm <- amp_merge_replicates(amp_mmb, "muestramarcador", round = "up")
+amp_mmbm <- filter_otus(amp_mmbm, 0.1) # Filtrado para aumentar fiabilidad
+meths <- c("Observed", "Shannon", 
+           "Simpson", "Fisher")
+alfa_m <- cbind.data.frame(
+  amp_mmbm$metadata,
+  estimate_richness(amp2phy(amp_mmbm), measures = meths))
+alfa_m_p <- alfa_m %>%
+  pivot_longer(!names(amp_mmbm$metadata), names_to = "Index")
+alfa_m_p %>%
+  mutate(Index = factor(alfa_m_p$Index, levels = unique(alfa_m_p$Index))) %>%
+  ggplot(aes(x = marcador, y = value, color = marcador)) +
+  geom_boxplot() + 
+  geom_boxplot(aes(fill = marcador), alpha = .2) + 
+  facet_wrap(Index~., scales = "free_y", nrow = 1) +
+  stat_compare_means(label.y.npc = "bottom") + 
+  scale_color_brewer(palette = "Set2") + 
+  scale_fill_brewer(palette = "Set2") +
+  xlab("Marcador") + 
+  labs(color = "Marcador", fill = "Marcador") +
+  ylab("Valor") +
+  theme_bw()
+
+```
+
+  
+Por lo que se puede observar en la **Figura \ref{fig:fig7}**, no existen diferencias significativas entre la diversidad recogida por los marcadores genéticos, 18S y COI, aunque utilizando los índices de Shannon y de Simpson aparentemente sí podría parecer que el gen COI recoge más diversidad. Sobre todo a nivel de ASVs observadas parece que no existe ninguna diferencia entre los dos marcadores, teniendo ambos una mediana cercana a las 260.  
+
+Ahora, para poder realizar un estudio como los típicamente realizados para medio marino y poder incorporar los resultados de la asignación taxonómica a nivel visual, será necesario considerar únicamente las especies que hayan sido detectadas con la metodología de secuenciación. Además, para que las muestras sean estadísticamente comparables a la hora de realizar pruebas estadísticas, se ha realizado rarefacción sobre todas las muestras.  
+
+
+```{r fig8, results='hide', fig.show = TRUE, fig.width = 12, fig.height=5, dpi = 300,fig.align='center',fig.cap = "Boxplot de los resultados de diversidad para cada una de las muestras, diferenciadas por marcador. Los índices de estudio han sido: Familias observadas, Shannon, Simpson, invSimpson y Fisher. Los p-valores del U-test por pares y Kruskal-Wallis para cada índice se encuentran anotados en la figura encima de las cajas y al fondo de la figura, respectivamente."}
+amp_mm <- amp_merge_replicates(amp_m, "muestramarcador", round = "up")
+phy_mm <- amp2phy(amp_mm)
+# ampvis mezcla muy bien replicados (en phyloseq está buggeado) pero para los
+# filtros taxonómicos es mejor phyloseq y  el agregado de taxones se hace con
+# microbiome que utiliza solo objetos phyloseq, hay que estar mareando la perdiz 
+# para poder hacer esto
+seed = 1234
+phy_mmsp <- subset_taxa(phy_mm, Species != "")
+phy_mmspa <- aggregate_taxa(phy_mmsp, level = "Species")
+phy_mmspa_r <- rarefy_even_depth(phy_mmspa, rngseed = seed)
+
+# La rarefacción provoca que las muestras sean más comparables entre sí al 
+# realizar muestreos al nivel que detectamos individuos en visu
+
+alfa_ma <- cbind.data.frame(
+  sample_data(phy_mmspa_r), 
+  estimate_richness(phy_mmspa_r, measures = meths))
+
+alfa_map <- alfa_ma %>% 
+  pivot_longer(!names(amp_mm$metadata), names_to = "index")
+
+comp <- list(
+  c("18S", "COI"),
+  c("COI", "Visu"),
+  c("18S", "Visu")
+)
+
+alfa_map %>%
+  mutate(index = factor(alfa_map$index, levels = unique(alfa_map$index))) %>%
+  ggplot(aes(x = marcador, y = value, color = marcador)) +
+  geom_boxplot() +
+  geom_boxplot(aes(fill = marcador), alpha = .2) + 
+  facet_wrap(index~., scales = "free_y", nrow = 1) +
+  stat_compare_means(label.y.npc = "bottom",
+                     method.args = list(paired = T)) + 
+  stat_compare_means(comparisons = comp,
+                     tip.length = .01,
+                     method.args = list(paired = T)) +
+  scale_color_brewer(palette = "Set2") + 
+  scale_fill_brewer(palette = "Set2") +
+  xlab("Metodología") + 
+  ylab("Valor") +
+  labs(color = "Marcador", fill = "Marcador") +
+  theme_bw()
+
+```  
+
+En la **Figura \ref{fig:fig8}** aparentemente existe una mayor diversidad en el método de asignación taxonómica visual clásico, en comparación a los marcadores genómicos, sobre todo para el COI, donde el U-test es significativo para todos los índices de diversidad estudiados.  
+Al haber restringido el análisis a las especies que se han detectado en cada marcador, podemos ver un aparente crecimiento de la diversidad utilizando el gen 18S con respecto al gen COI, aunque no se trata de una diferencia estadísticamente significativa. Además, el gen 18S no parece tener diferencias significativas en diversidad con respecto a la asignación taxonómica visual, aunque parezca existir una tendencia que percibe que mediante el segundo método se detecta una mayor diversidad.  
+Por último, en términos generales entre los tres marcadores sí parecen existir diferencias significativas en la diversidad, a excepción de cuándo estudiamos el índice de diversidad de Simpson, según los p-valores de la prueba de Kruskal-Wallis.  
+
+También es interesante revisar cuáles de las especies que se han detectado coinciden entre las distintas técnicas. Para ello se ha realizado un diagrama de Venn (**Figura \ref{fig:fig9}**), donde podemos observar que existe una gran discrepancia entre las especies que se han detectado dependiendo del marcador.  
+
+
+```{r fig9, fig.show = TRUE, fig.width =4 , fig.height=4, dpi = 300,fig.align='center',fig.cap = "Diagrama de Venn de todas las especies identificadas en función del marcador."}
+
+## No he encontrado una manera mejor de hacer esto sinceramente
+# Juntamos los datos de tax y otus
+amp_mmspa <- amp_load(phy_mmspa)
+amp_mmspa_f <- filter_otus(amp_mmspa, .1)
+# data_venn <- merge(phy_mmspa@otu_table@.Data, phy_mmspa@tax_table@.Data, by = 0)
+data_venn <- merge(amp_mmspa_f$abund, amp_mmspa_f$tax, by = 0)
+
+# Separamos en objetos cada una de las taxonomías asociadas a cada marcador
+coi <- data_venn[,c(colnames(data_venn)[grep("COI", colnames(data_venn))], "Species")]
+visu <- data_venn[,c(colnames(data_venn)[grep("Visu", colnames(data_venn))], "Species")]
+s18 <- data_venn[,c(colnames(data_venn)[grep("18S", colnames(data_venn))], "Species")]
+# Extraemos las familias que hayan sido detectadas al menos en una muestra una vez
+coi_sp <- unique(coi[rowSums(coi[,1:length(coi) -1]) > 0,"Species"])
+visu_sp <- unique(visu[rowSums(visu[,1:length(visu) -1]) > 0,"Species"])
+s18_sp <- unique(s18[rowSums(s18[,1:length(s18) -1]) > 0,"Species"])
+# Generamos la lista para el Venn
+x = list(
+  "COI" = coi_sp,
+  "18S" = s18_sp,
+  "Visu" = visu_sp
+  )
+
+ggVennDiagram(
+  x,
+  label_alpha = 0
+) +
+  scale_fill_gradient("Nº Especies",low = "white", high = "red") + 
+  scale_color_manual(values = c("black", "black", "black")) +
+  # labs(title = "Medio marino") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        legend.position = "none")
+
+```  
+
+Podemos observar que la mayoría de la diversidad recogida por la técnica de asignación taxonómica visual no se encuentra recogida, solamente detectando 35 especies de 140 mediante técnicas genómicas, y siendo el 18S el marcador que más de estas especies consigue identificar, 22.  
+
+Además, tampoco existe correspondencia entre los marcadores genéticos, únicamente coincidiendo 9 especies de las 165 identificadas por Metabarcoding.  
+
+
+```{r , eval = F, echo = F}
+### VOY A HACER UNA PRUEBA CON LAS FAMILIAS A VER SI SALE MEJOR PERO VAMOS UF ###
+
+phy_mmf <- subset_taxa(phy_mm, Family != "")
+phy_mmfa <- aggregate_taxa(phy_mmf, level = "Family")
+amp_mmfa <- amp_load(phy_mmfa)
+amp_mmfa_f <- filter_otus(amp_mmfa, .1)
+
+## No he encontrado una manera mejor de hacer esto sinceramente
+# Juntamos los datos de tax y otus
+# data_venn <- merge(phy_mmfa@otu_table@.Data, phy_mmfa@tax_table@.Data, by = 0)
+data_venn <- merge(amp_mmfa_f$abund, amp_mmfa_f$tax, by = 0)
+# Separamos en objetos cada una de las taxonomías asociadas a cada marcador
+coi <- data_venn[,c(colnames(data_venn)[grep("COI", colnames(data_venn))], "Family")]
+visu <- data_venn[,c(colnames(data_venn)[grep("Visu", colnames(data_venn))], "Family")]
+s18 <- data_venn[,c(colnames(data_venn)[grep("18S", colnames(data_venn))], "Family")]
+# Extraemos las familias que hayan sido detectadas al menos en una muestra una vez
+coi_f <- unique(coi[rowSums(coi[,1:length(coi) -1]) > 0,"Family"])
+visu_f <- unique(visu[rowSums(visu[,1:length(visu) -1]) > 0,"Family"])
+s18_f <- unique(s18[rowSums(s18[,1:length(s18) -1]) > 0,"Family"])
+# Generamos la lista para el Venn
+x = list(
+  "COI" = coi_f,
+  "18S" = s18_f,
+  "Visu" = visu_f
+  )
+
+ggVennDiagram(
+  x,
+  label_alpha = 0
+) +
+  scale_fill_gradient("Nº Familias",low = "white", high = "red") + 
+  scale_color_manual(values = c("black", "black", "black")) +
+  # labs(title = "Medio marino") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        legend.position = "none")
+# Las familias marinas también salen de culo sinceramente
+```  
+
+Este hecho de poca correspondencia entre las técnicas también lo podemos ver en la **Figura \ref{fig:fig10}**, donde se puede observar que de las especies más abundantes en la muestra apenas existen coincidencias entre técnicas, y de hecho no existe ninguna que se haya detectado con las tres técnicas simultáneamente. No obstante, en los casos en los que se ha detectado por al menos dos de los tres marcadores sí que aparentemente existen abundancias similares.  
+
+
+```{r fig10, fig.show = TRUE, fig.width = 6, fig.height=5, dpi = 300,fig.align='center',fig.cap = "Diagrama de cajas de las 10 familias más abundantes para todas las metodologías. La abundancia viene expresada en forma de abundancia relativa en escala logarítmica para una mejor visualización."}
+# amp_mmspa_r <- amp_load(phy_mmspa_r)
+# amp_mmspa <- amp_load(phy_mmspa)
+p <- amp_boxplot(amp_mmspa_f,
+            tax_aggregate = "Species",
+            normalise = T,
+            group_by = "marcador",
+            tax_show = 10,
+            plot_log = T) +
+  geom_boxplot(aes(fill = .Group), alpha = .2)+
+  scale_color_brewer(palette = "Set2") + 
+  scale_fill_brewer(palette = "Set2", guide = "none") +
+  stat_compare_means(label.y.npc = "bottom") + # se ve bien feo en este gráfico
+  labs(color = "Marcador",
+       y = "Abundancia relativa (%)")
+
+p # Hostia sale de putísimo culo
+```
+  
+  
+## Diversidad Beta  
+
+Otro de los apartados de interés de este estudio es la diferencia de localización en las muestras. Las muestras se recogieron en 2 puntos distintos: En un punto cercano a un vertido y en un punto lejano a ese mismo vertido. En este ensayo también se quiere comprobar si existen diferencias en diversidad para estos dos puntos de muestreo. Para poder demostrar que la composición en diversidad biológica entre estos puntos, es necesario la el cálculo de las distancias entre las muestras y posterioremnte análisis de ordenación. Las distancias han sido calculadas mediante la metodología de Bray-Curtis, típica de este tipo de estudios. Con la matriz de distancias de Bray-Curtis, se ha realizado un NMDS (non-metric multidimensional scaling) para visualizar la separación de estas muestras (**Figura \ref{fig:fig11}A**), y también, se ha realizado un análisis de redundancia (RDA) utilizando el Punto de muestreo como variable de restricción para comprobar cuánta explicabilidad a la variación aporta esta variable al conjunto de datos (**Figura \ref{fig:fig11}B**). En este último caso, se ha utilizado la transformada de Hellinger sobre la matriz de distancias, la cuál permite reducir el impacto de las especies menos abundantes, consiguiendo un resultado más explicativo a nivel ecológico.  
+
+```{r fig11, fig.show = TRUE, fig.width = 10, fig.height=4, dpi = 300, fig.align='center',fig.cap = "Análisis de ordenación mediante nMDS (A) y RDA utilizando como variable de restricción el punto de muestreo (B). Se ha anotado la región que delimita los puntos de muestreo y los distintos marcadores en la ordenación."}
+amp_mmspa_r <- amp_load(phy_mmspa_r)
+amp_mmspa_r$metadata$Puntomarcador = 
+  factor(paste(
+    amp_mmspa_r$metadata$Punto,
+    amp_mmspa_r$metadata$marcador,
+    sep = "-"
+  ), levels = c(
+    "Cercano al vertido-Visu",
+    "Lejano al vertido-Visu",
+    "Cercano al vertido-18S",
+    "Lejano al vertido-18S",
+    "Cercano al vertido-COI",
+    "Lejano al vertido-COI"
+  ))
+
+
+p1 <- amp_ordinate(amp_mmspa_r,
+             type = "nmds", # 0.053
+             filter_species = 0, 
+             distmeasure = "bray",
+             transform = "none",
+             sample_color_by = "Puntomarcador",
+             sample_colorframe = T,
+             sample_shape_by = "marcador"
+             ) +
+  labs(color = "Punto - Marcador",
+       fill = "Punto - Marcador") +
+  scale_color_tableau(palette = "Tableau 20") +
+  scale_fill_tableau(palette = "Tableau 20")
+# el PCA arroja <20% cualquier componente principal, baja explicabilidad,
+# por eso voy a hacer NMDS, que además es lo que hacen en marino
+p2 <- amp_ordinate(amp_mmspa_r,
+             type = "rda",
+             filter_species = 0, 
+             distmeasure = "bray",
+             constrain = c("Punto"),
+             transform = "hellinger",
+             sample_color_by = "Puntomarcador",
+             sample_colorframe = T,
+             sample_shape_by = "marcador") +
+  scale_color_tableau(palette = "Tableau 20") +
+  scale_fill_tableau(palette = "Tableau 20")
+leg <- get_legend(p1)
+
+grph <- plot_grid(
+  p1 + theme(legend.position="none"),
+  p2 + theme(legend.position="none"),
+  align = 'vh',
+  labels = "AUTO",
+  hjust = -1,
+  nrow = 1
+)
+
+plot_grid(
+  grph, leg,
+  rel_widths = c(2,.5)
+)
+
+```  
+
+En el NMDS se han recogido los distintos grupos que componen la muestra. El valor del estrés para el NMDS es de 0.053, implicando que es un muy buen fit. En  primer lugar, se puede observar que la separación más clara que existe en la **Figura \ref{fig:fig11}A** es debida al marcadores que se ha utilizado. También se puede observar que en el único caso en el que se ha visto que existan dos grupos claramente separados al comparar por Puntos de muestreo, es en el caso del gen 18S, tanto en COI como en asignación taxonómica visual los grupos aparentemente están separados.  
+
+Por otro lado, se ha realizado el análisis de redundancia (RDA) tomando como variable de restricción el Punto de muestreo, con la intención de examinar la variación de la diversidad en función de dicha variable. De esta manera, en la **Figura \ref{fig:fig11}B** sí que podemos observar la separación entre los distintos grupos, aunque el RDA aporta una explicación de la variabilidad mínima (3.8%).  
+
+Con el fin de recoger estos hechos a nivel estadístico, se han realizado PERMANOVAS en distintas condiciones. Tal como se puede ver en la **Tabla \ref{tab:tab2}**, utilizando el total del conjunto de datos no existen diferencias significativas al comparar los datos entre los puntos de muestreo. También se realizaron los muestreos en distintos meses, no obstante no tienen relevancia para este trabajo, y además tampoco muestran resultados significativamente distintos.  
+No obstante, sí que podemos ver diferencias significativas entre los distintos marcadores (18S, COI y Visu) al igual que si agrupamos las muestras genómicas contra las de asignación taxonómica visual.  
+
+También se han separado las muestras del ensayo por método, y se han vuelto a realizar los PERMANOVAS. En el caso del Punto de muestreo, las muestras arrojan resultados distintos significativamente únicamente en el caso de la asignación taxonómica visual, mientras que estudiando las muestras por Metabarcoding no existen resultados significativos. Además, también podemos observar que las diferencias entre los propios marcadores genéticos son estadísticamente significativas.  
+
+```{r tab2}
+## También toca hacer la estadística, no solo van a ser dibujitos.
+# Punto
+bray <- distance(phy_mmspa_r, method = "bray")
+df <- as(sample_data(phy_mmspa_r), "data.frame") # por algun motivo no funciona con as.data.frame
+res1 <- adonis2(bray ~ Punto, data = df) # 0.255
+res2 <- adonis2(bray ~ mes, data = df) # 0.834
+res3 <- adonis2(bray ~ marcador, data = df) # <0.001***
+res4 <- adonis2(bray ~ metodo, data = df) # <0.001***
+
+
+### separando
+phy_mmspa_mb <- subset_samples(phy_mmspa, metodo == "Metabarcoding")
+bray_mb <- distance(phy_mmspa_mb, method = "bray")
+df_mb <- as(sample_data(phy_mmspa_mb), "data.frame")
+phy_mmspa_visu <- subset_samples(phy_mmspa, metodo == "Visualización")
+bray_visu <- distance(phy_mmspa_visu, method = "bray")
+df_visu <- as(sample_data(phy_mmspa_visu), "data.frame")
+
+res5 <- adonis2(bray_mb ~ Punto, data = df_mb) # 0.116
+res6 <- adonis2(bray_visu ~ Punto, data = df_visu) # 0.044* 
+
+res7 <- adonis2(bray_mb ~ marcador, data = df_mb) # 0.001*** 
+
+res_list <- list(res1, res2, res3, res4, res5, res6, res7)
+for (i in seq(res_list)){
+  res_list[[i]] <- rownames_to_column(as.data.frame(res_list[[i]]), " ")
+}
+res_final <- list_rbind(res_list) %>%
+  mutate("F" = round(.$F, digits = 3)) %>%
+  replace(is.na(.), " ")
+
+kbl(res_final, caption = "Resultados PERMANOVA",
+    booktabs = T, align = "c", digits = 3) %>%
+  kable_classic(full_width = F) %>%
+  kable_styling(latex_options = c("striped", "HOLD_position", "repeat_header")) %>%
+  pack_rows("Punto (T)", 1,3) %>%
+  pack_rows("Mes (T)", 4, 6) %>%
+  pack_rows("Marcador (T)", 7,9) %>%
+  pack_rows("Método (T)", 10, 12) %>%
+  pack_rows("Punto (MB)", 13, 15) %>%
+  pack_rows("Punto (V)", 16, 18) %>%
+  pack_rows("Marcador (MB)", 19, 21) %>%
+  column_spec(6, bold = TRUE) %>%
+  footnote(general = "Abreviaciones. ",
+           number = c("T: Total de muestras;",
+                      "MB: Metabarcoding;",
+                      "V: Visualización taxonómica;"))
+# Menuda tremenda basura de resultados dude
+```
+  
+
+## Indicadores de calidad bióticos (AMBI)  
+
+```{r}
+
+# Como todo esto está desarrollado para el GO-MBIC voy a rallarme la cabeza para
+# entregarle ese formato al programa y au (esperemos que no sea doloroso).  
+## vale, creo que con hacer una tabla que sea primera columna las especies y el 
+#resto los conteos de las muestras lo hará. Probaré a ver y si fracaso lo iré 
+#poniendo aquí. Además, como el AMBI es más rápido y el ampvis me permite 
+# mezclar réplicas será en principio más fácil que el IBMWP (EN PRINCIPIO). GL  
+
+read_input <- function(amp_data){
+  data <- amp_data
+  names(data)[1] = "Specie"
+  data[is.na(data)] = 0
+  sps_l <- strsplit(data$Specie, split = " ")
+  sps <- data.frame(Specie = data$Specie,
+                    Genus = rep(NA, nrow(data)))
+  for (i in 1:length(sps_l)){
+    sps$Genus[i] = paste0(sps_l[[i]][1], " sp.")
+  }
+  sps$Genus[which(sps$Specie == sps$Genus)] <- NA 
+  
+  selected_samples <- names(data)[2:length(data)]
+  
+  sps_div <- data # cambio de variable para poder utilizar el código del de metagenómica
+  data_agg <- aggregate(. ~ Specie, data, sum)
+  rownames(data_agg) <- data_agg$Specie
+  data_agg <- data_agg[,-1]
+  return(list(sps, data_agg, selected_samples))
+}
+find_matches <- function(ref, sps, count_data, samples){
+  found_sp <- sps[rownames(sps)[which(sps$Specie %in% ref$Specie)],"Specie",drop = FALSE]
+  found_gen <- sps[rownames(sps)[(which(!(sps$Specie %in% ref$Specie) & sps$Genus %in% ref$Specie))],"Genus",drop = FALSE]
+  colnames(found_sp) <- c("Match")
+  colnames(found_gen) <- c("Match")
+  
+  matches <- rbind(found_sp, found_gen)
+  names(matches)[1] <- "Specie"
+  matches$found = 1
+  count_data$Specie <- rownames(count_data)
+  
+  data_matches <- merge(matches, count_data, by = "Specie", all.y = T)
+  
+  df_zeros <- which(apply(data_matches[,-c(1,2)], 1, sum) == 0)
+  if (length(df_zeros) > 0) data_matches <- data_matches[-df_zeros,]
+  
+  input_data <- merge(data_matches, ref, by = "Specie", all.x = T)
+  input_data$Value[is.na(input_data$Value)] = "n.a."
+  input_data[is.na(input_data)] = 0
+  input_data$Value[input_data$Value == 0] = 1
+  input_data$Value[input_data$Value == 1] = "EG1"
+  input_data$Value[input_data$Value == 2] = "EG2"
+  input_data$Value[input_data$Value == 3] = "EG3"
+  input_data$Value[input_data$Value == 4] = "EG4"
+  input_data$Value[input_data$Value == 5] = "EG5"
+  input_data[,samples] <- apply(input_data[,samples], 2, function(x) (x*100)/sum(x))
+  
+  return(input_data)
+}
+process_input <- function(data_matches, ref, samples){
+
+  input_short <- data_matches[,c(samples, "Value")]
+  na_samples <- which(apply(input_short, 2, function(x) all(is.na(x))))
+  if (length(na_samples) != 0){
+    input_short <- input_short[,-na_samples]
+  }
+  input_aggregated <- aggregate(. ~ Value, input_short, function(x) sum(x, na.rm = T))
+  # rownames(input_aggregated) <- c("%na", paste0("EG", rep(1:5)))
+  df_comp <- data.frame(Value = c("n.a.", paste0("EG", rep(1:5))))
+  
+  input_aggregated_2 <- merge(df_comp, input_aggregated, by = "Value", all.x = T)
+  input_aggregated_2[is.na(input_aggregated_2)] = 0
+  rownames(input_aggregated_2) <- input_aggregated_2[,"Value"]
+  input_aggregated <- input_aggregated_2[,-1]
+  
+  ecgroups <- as.data.frame(t(input_aggregated))
+  ecgroups_2 <- apply(ecgroups[,names(ecgroups) != "n.a."],1, function(x) (x*100)/sum(x))
+  ecgroups <- cbind(as.data.frame(t(ecgroups_2)),ecgroups$`n.a.`)
+  names(ecgroups)[6] <- "n.a."
+  
+  return(ecgroups)
+}
+calculate_AMBI <- function(results_df){
+  results_df$AMBI <- (
+    results_df$EG1 * 0 +
+    results_df$EG2 * 1.5 +
+    results_df$EG3 * 3 +
+    results_df$EG4 * 4.5 +
+    results_df$EG5 * 6
+  ) / 100
+  
+  results_df[results_df$AMBI == 0 & results_df$EG1 == 0,] = 7
+  
+  return(results_df)
+}
+
+
+
+AMBI_reference <- read.delim("~/GO-MBIC/Data/AMBI_BOPA_ref.tsv", sep = "\t")
+phy_m <- amp2phy(amp_m)
+phy_msp <- subset_taxa(phy_m, Species != "")
+phy_mspa <- aggregate_taxa(phy_msp, level = "Species")
+amp_mspa <- amp_load(phy_mspa)
+amp_mspa_f <- filter_otus(amp_mspa, .1)
+
+
+amp_data_ambi <- merge(amp_mspa_f$tax[,"Species", drop = F], amp_mspa_f$abund, by = 0)
+amp_data_ambi <- select(amp_data_ambi,-(Row.names))
+
+input_ambi <- read_input(amp_data_ambi)
+sp_list <- input_ambi[[1]]
+counts <- input_ambi[[2]]
+sample_names <- input_ambi[[3]]
+
+df_matches <- find_matches(AMBI_reference, sp_list, counts, sample_names)
+
+# samples <- sample_names
+# data_matches <- df_matches
+# ref <- AMBI_reference
+
+ecogroups <- process_input(df_matches, AMBI_reference, sample_names)
+res_ambi <- calculate_AMBI(ecogroups)
+
+df_ambi_3 <- rownames_to_column(res_ambi[,"AMBI", drop = F])
+colnames(df_ambi_3) <- c("sample.id", "AMBI")
+p3 <- df_ambi_3 %>% 
+  inner_join(amp_mspa_f$metadata, by = "sample.id")  %>%
+  select(c(AMBI, muestra, marcador, metodo, Punto)) %>%
+  group_by(Punto, muestra, metodo) %>% summarise(AMBI = mean(AMBI)) %>%
+  arrange(metodo,muestra) %>% 
+  ggpaired(x = "metodo", y = "AMBI", color = "metodo") +
+  # facet_grid(.~Punto) +
+  scale_color_brewer(palette = "Set1") + 
+  stat_compare_means(method = "t.test", paired = T, label.x.npc = .4) + 
+  labs(
+    x = "Método",
+    y = "Puntuación AMBI",
+    color = "Método"
+  )
+
+## Ahora todos juntos por muestra y au ##
+
+amp_mspa_f$metadata$muestrametodo <- paste(
+  amp_mspa_f$metadata$muestra, 
+  amp_mspa_f$metadata$metodo,
+  sep = "-"
+) # Hostia estoy hasta la polla de hacer este código NGL
+amp_mspa_fmmu <- amp_merge_replicates(amp_mspa_f, "muestrametodo", round = "up")
+
+
+amp_data_ambi <- merge(amp_mspa_fmmu$tax[,"Species", drop = F], amp_mspa_fmmu$abund, by = 0)
+amp_data_ambi <- select(amp_data_ambi,-(Row.names))
+
+# write.csv( amp_data_ambi, "prueba_gombic.csv", sep = ",", row.names = F,
+#            col.names = T)
+input_ambi <- read_input(amp_data_ambi)
+sp_list <- input_ambi[[1]]
+counts <- input_ambi[[2]]
+sample_names <- input_ambi[[3]]
+
+df_matches <- find_matches(AMBI_reference, sp_list, counts, sample_names)
+
+# samples <- sample_names
+# data_matches <- df_matches
+# ref <- AMBI_reference
+
+ecogroups <- process_input(df_matches, AMBI_reference, sample_names)
+res_ambi <- calculate_AMBI(ecogroups)
+
+# res_ambi$AMBI # Vale, este es el primero, el que sería la A del IBMWP
+
+df_ambi_1 <- rownames_to_column(res_ambi[,"AMBI", drop = F])
+# colnames(df_ambi_3) <- c("sample.id", "AMBI")
+p1 <- df_ambi_1 %>% 
+  mutate(
+    muestra = str_split_fixed(rowname, "-",2)[,1]
+  ) %>% rename("muestrametodo" = "rowname") %>%
+  inner_join(amp_mspa_fmmu$metadata, by = c("muestra", "muestrametodo")) %>%
+  select(c(AMBI, muestra, marcador, metodo, Punto)) %>%
+  arrange(metodo,muestra) %>%
+  ggpaired(x = "metodo", y = "AMBI", color = "metodo") +
+  # facet_grid(.~Punto) +
+  scale_color_brewer(palette = "Set1") + 
+  stat_compare_means(method = "t.test", paired = T, label.x.npc = .4) + 
+  labs(
+    x = "Método",
+    y = "Puntuación AMBI",
+    color = "Método"
+  )
+
+## Va que ya solo falta el AMBI agrupando las réplicas por el marcador  
+
+amp_mspa_f$metadata$muestrareplica <- paste(
+  amp_mspa_f$metadata$muestra,
+  amp_mspa_f$metadata$replica,
+  amp_mspa_f$metadata$metodo, # por si acaso
+  sep = "-" 
+)
+amp_mspa_fmma <- amp_merge_replicates(amp_mspa_f, "muestrareplica")
+
+
+amp_data_ambi <- merge(amp_mspa_fmma$tax[,"Species", drop = F], amp_mspa_fmma$abund, by = 0)
+amp_data_ambi <- select(amp_data_ambi,-(Row.names))
+
+# write.csv( amp_data_ambi, "prueba_gombic.csv", sep = ",", row.names = F,
+#            col.names = T)
+input_ambi <- read_input(amp_data_ambi)
+sp_list <- input_ambi[[1]]
+counts <- input_ambi[[2]]
+sample_names <- input_ambi[[3]]
+
+df_matches <- find_matches(AMBI_reference, sp_list, counts, sample_names)
+
+# samples <- sample_names
+# data_matches <- df_matches
+# ref <- AMBI_reference
+
+ecogroups <- process_input(df_matches, AMBI_reference, sample_names)
+res_ambi <- calculate_AMBI(ecogroups)
+
+# res_ambi$AMBI # Vale, este es el primero, el que sería la A del IBMWP
+
+df_ambi_2 <- rownames_to_column(res_ambi[,"AMBI", drop = F])
+# colnames(df_ambi_2) <- c("sample.id", "AMBI")
+p2 <- df_ambi_2 %>% 
+  rename("muestrareplica" = "rowname") %>%
+  inner_join(amp_mspa_fmma$metadata, by = c("muestrareplica")) %>%
+  group_by(Punto, muestra, metodo) %>% summarise(AMBI = mean(AMBI)) %>%
+  arrange(metodo,muestra) %>%
+  ggpaired(x = "metodo", y = "AMBI", color = "metodo") +
+  # facet_grid(.~Punto) +
+  scale_color_brewer(palette = "Set1") + 
+  stat_compare_means(method = "t.test", paired = T, label.x.npc = .4) + 
+  labs(
+    x = "Método",
+    y = "Puntuación AMBI",
+    color = "Método"
+  )
+
+
+```
+  
+El índice biótico AMBI (AZTI's Marine Biotic Index) es un marcador ampliamente utilizado a nivel mundial para el estudio de la calidad del agua en a partir de la composición de la diversidad de macroinvertebrados. Este índice va de 0 a 6 determinando los siguientes umbrales:  
+
+- 0 < AMBI < 1.2: Sin perturbaciones
+- 1.2 < AMBI < 3.3: Ligeramente perturbado
+- 3.3 < AMBI < 4.3: Perturbado
+- 4.3 < AMBI < 5.0: Contaminado
+- 5.0 < AMBI < 5.5: Bastante contaminado
+- 5.5 < AMBI < 6: Muy contaminado  
+
+Para este trabajo se ha desarrollado una rutina de cálculo que permite la obtención del AMBI de manera programática y a partir de los datos de secuenciación metataxonómica.  
+Además, se han probado distintas aproximaciones al cálculo del AMBI con respecto a la agrupación de las réplicas técnicas para comprobar cómo se compara con los datos de asignación taxonómica visual.  
+
+Las distintas condiciones que se han probado a nivel de muestra han sido:  
+
+- Combinación de todas las réplicas de cada muestra y cálculo individual de cada AMBI (**Figura \ref{fig:fig12}A**).
+- Combinación de los marcadores por cada réplica técnica y media de la puntuación del AMBI de las réplicas(**Figura \ref{fig:fig12}B**).
+- Media del cálculo individual del AMBI por cada réplica y marcador (**Figura \ref{fig:fig12}C**).  
+
+Los resultados entre las metodologías se han comparado mediante pruebas de la T de Student con muestras apareadas.  
+
+
+
+
+```{r fig12, fig.show = TRUE, fig.width = 8, fig.height=6, dpi = 300, fig.align='center',fig.cap = "Comparativa de las puntuaciones AMBI entre la técnica de Metabarcoding (Rojo) y asignación taxonómica mediante visualización (Azul). Las líneas negras unen las muestras homólogas de ambas técnicas. Se encuentra anotado el p-valor para los t-test con muestras apareadas. A. Combinación de todas las réplicas de cada muestra y cálculo individual de cada AMBI; B. Combinación de los marcadores por cada réplica técnica y media de la puntuación del AMBI de las réplicas; C. Media del cálculo individual del AMBI por cada réplica y marcador."}
+
+leg <- get_legend(p1)
+p1 <- p1 + theme(legend.position = "none")
+p2 <- p2 + theme(legend.position = "none")
+p3 <- p3 + theme(legend.position = "none")
+
+p_t <- plot_grid(
+  plot_grid(p1, p2, nrow = 1, ncol = 2, labels = c("A", "B")),
+  plot_grid(NULL, p3, NULL, nrow = 1, labels = c("", "C", ""),
+            rel_widths = c(0.45, 1, 0.45)),
+  nrow = 2
+)
+
+grph <- plot_grid(
+  leg,
+  p_t,
+  rel_heights = c(.2, 3), 
+  ncol = 1,
+  nrow = 2
+  
+)
+grph
+```
+  
+En el caso de este análisis, nos interesa que las muestras den resultados comparables con la asignación taxonómica visual, lo que quiere decir que nos interesa el caso en el que las diferencias no sean significativas entre las muestras. Este ha sido el caso para todos los casos analizados, siendo que todos los p-valores de las pruebas de la T dan mayor al umbral de significación (0.05).  
+
+Aun así, el caso en el que el p-valor ha sido mayor, se ha tratado del caso de la **Figura \ref{fig:fig12}A**, combinando la información de todas las réplicas técnicas previamente al cálculo del AMBI.  
+
+
+```{r, eval = F, echo = F, results = "hide"}
+
+# load("session.RData")
+
+df_ambi_1 %>% 
+  mutate(
+    muestra = str_split_fixed(rowname, "-",2)[,1]
+  ) %>% rename("muestrametodo" = "rowname") %>%
+  inner_join(amp_mspa_fmmu$metadata, by = c("muestra", "muestrametodo")) %>%
+  select(c(AMBI, muestra, marcador, metodo, Punto)) %>%
+  arrange(metodo,muestra) %>%
+  ggplot(aes(x = Punto, y = AMBI)) + 
+  geom_boxplot() + 
+  facet_grid(.~metodo) +
+  stat_compare_means()
+
+df_ibmwp %>% 
+  ggplot(aes(x = Punto, y = IBMWP_Score)) + 
+  geom_boxplot() + 
+  facet_grid(.~Metodo) +
+  stat_compare_means(method = "t.test")
+
+```
+
