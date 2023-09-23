@@ -1,5 +1,5 @@
 # TFMVIU
-Análisis de macroinvertebrados mediante Metabarcoding y su uso como indicador de calidad de aguas continentales.
+Análisis de *macroinvertebrados* mediante *Metabarcoding* y su uso como indicador de calidad de aguas continentales.
 
 La caracterización de las especies de macroinvertebrados presentes en el agua, se ha utilizado tradicionalmente como indicador de calidad de las aguas.
 Estas determinaciones requieren de la identificación de visu  de la macrofauna y del cálculo de índices bióticos. Se trata de un proceso costoso en tiempo y, en cierto modo subjetivo,
@@ -13,7 +13,7 @@ La pipeline está diseñada para analizar amplicones del gen 18S y COI secuencia
 
 - Se incluye:
   -   La creación, descarga y curado de la base de datos
-  -   Preprocesado, análisis y asignación taxonómica de las lecturas**
+  -   Preprocesado, análisis y asignación taxonómica de las lecturas
   -   Visualización gráfica de los resultados
   -   Análisis estadístico
   -   Cálculo índice de calidad IBMWP
