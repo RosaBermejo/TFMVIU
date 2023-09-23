@@ -13,7 +13,7 @@ La pipeline está diseñada para analizar amplicones del gen 18S y COI secuencia
 
 - Se incluye:
 
-  - ## **La creación, descarga y curado de la base de datos**
+  - # La creación, descarga y curado de la base de datos
   - ## ** Preprocesado, análisis y asignación taxonómica de las lecturas**
   - ## Visualización gráfica de los resultados
 ## Análisis estadístico
