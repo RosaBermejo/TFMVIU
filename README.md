@@ -1,7 +1,7 @@
 # TFMVIU
 Análisis de *macroinvertebrados* mediante *Metabarcoding* y su uso como indicador de calidad de aguas continentales.
 
-La caracterización de las especies de ** macroinvertebrados ** presentes en el agua, se ha utilizado tradicionalmente como indicador de calidad de las aguas.
+La caracterización de las especies de **macroinvertebrados** presentes en el agua, se ha utilizado tradicionalmente como indicador de calidad de las aguas.
 Estas determinaciones requieren de la identificación de visu  de la macrofauna y del cálculo de índices bióticos. Se trata de un proceso costoso en tiempo y, en cierto modo subjetivo,
 ya que requiere de personal altamente especializado capaz de realizar la clasificación taxonómica. Es por esto, que la llegada de técnicas moleculares de alto rendimiento
 como la secuenciación masiva, mediante la utilización de **marcadores moleculares**, han supuesto un cambio de paradigma ya que permiten abordar estos análisis utilizando el ADN ambiental
