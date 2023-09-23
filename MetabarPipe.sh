@@ -166,7 +166,7 @@ qiime tools export \
 	--input-path ${WD}/qiime/denoising-stats.qzv \
 	--output-path ${WD}/QC/denoising
 
-# Árbol filogenético de nuestras muestras (mafft-MSA and fasttree)
+# Árbol filogenético de nuestras muestras aunque finalmente no lo utilizamos (mafft-MSA and fasttree)
 qiime phylogeny align-to-tree-mafft-fasttree \
 	--i-sequences ${WD}/qiime/rep-seqs.qza \
 	--o-alignment ${WD}/qiime/aligned-rep-seqs.qza \
@@ -175,9 +175,6 @@ qiime phylogeny align-to-tree-mafft-fasttree \
 	--o-rooted-tree ${WD}/qiime/rooted-tree.qza
 
 # Clasificación taxonómica
-### Aquí ya lo siento pero voy a quemar el pc con el -2.
-### utiliza todos los cpu menos uno, y todavía estoy siendo
-### bueno
 
 echo '-----------------------------------'
 echo 'Realizando clasificación taxonómica'
@@ -199,7 +196,6 @@ elif [ $FUNC == 2 ]; then
 		--i-reference-reads ${REFCLASS}_seqs.qza \
 		--i-reference-taxonomy ${REFCLASS}_tax.qza \
 		--o-classification ${WD}/results/seqs-blast_taxonomy.qza
-	# Voy a tener que arreglar el hardcodeado del nombre de la clasificación con el blast o moriré posteriormente
 fi
 
 # Realizamos un barplot sobre los resultados
@@ -208,43 +204,13 @@ qiime taxa barplot \
 	--i-taxonomy ${WD}/results/seqs*_taxonomy.qza \
 	--m-metadata-file ${WD}/${metadata} \
 	--o-visualization ${WD}/results/taxa-bar-plots.qzv
-## este sí que está bien revisarlo en qiime view ngl
-
-############################################
-### Forma anterior de hacerlo, lo he metido en un script diferente, así que voy a llamar directamente a ese script
-# Ahora toca realizar toda la exportación de qiime a biom para poder trabajar con phyloseq en R
-# qiime tools export \
-# 	--input-path ${WD}/results/seqs_taxonomy.qza \
-# 	--output-path ${WD}/biom/ 
-# qiime tools export \
-# 	--input-path ${WD}/qiime/table.qza \
-# 	--output-path ${WD}/biom/
-# qiime tools export \
-# 	--input-path ${WD}/qiime/rooted-tree.qza \
-# 	--output-path ${WD}/biom/
-
-# Retocamos los archivos biom para poder tenerlos en el formato que necesita biom
-
-# echo -e "#OTUID\ttaxonomy\tconfidence" > ${WD}/biom/tax_table.tsv
-# tail -n +2 ${WD}/biom/taxonomy.tsv >> ${WD}/biom/tax_table.tsv
-# biom add-metadata \
-# 	-i ${WD}/biom/feature-table.biom \
-# 	-o ${WD}/biom/table-with-tax.biom \
-# 	--observation-metadata-fp ${WD}/biom/tax_table.tsv \
-# 	--sc-separated taxonomy
-# biom convert \
-# 	-i table-with-tax.biom \
-# 	-o table-with-tax-json.biom \
-# 	--table-type="OTU table" \
-# 	--to-json
-########################################
-
+## Interesante revisarlo en qiime view
 
 echo '---------------'
 echo 'Fin del proceso'
 echo '---------------'
 echo
-## Con esto ya se pueden hacer cosas en phyloseq, que como es más de R, pues lo voy a dejar para trabajar en R, si en algún momento llegase a tener algún script automatizado lo mismo lo meto aquí
+## A partir de aquí proceder con phyloseq
 
 . ${SHDIR}/qiime2biom.sh \
 	-i ${WD}/qiime/table.qza \
