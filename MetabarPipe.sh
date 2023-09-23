@@ -7,7 +7,8 @@ caracterización de macroinvertebrados
 
 Versión: 0.1
 Autor: Rosa Bermejo
-Grupo: TFM bioinformática VIU
+Tutor: Rubén Cañas
+Trabajo: TFM bioinformática VIU
 Fecha: Septiembre 2023
 ####################################
 "
